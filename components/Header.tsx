@@ -167,8 +167,9 @@ const Header: React.FC = () => {
           <Link to={user?.isMaster ? "/admin/events" : "/"}>
             <img src={triad3Logo} alt="Triad3 Logo" className="h-12 w-12 rounded-full object-cover" />
           </Link>
-          <h1 className="hidden sm:block text-xl font-bold text-text">
-            Central de Inteligência do Evento (CIE)
+          <h1 className="text-xl font-bold text-text">
+            <span className="sm:hidden">CIE</span>
+            <span className="hidden sm:inline">Central de Inteligência do Evento (CIE)</span>
           </h1>
         </div>
         <div className="flex items-center gap-2 sm:gap-4">
