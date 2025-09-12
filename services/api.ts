@@ -1065,7 +1065,7 @@ export const getStockMovementsByEvent = async (eventId: string): Promise<FullSto
             id,
             type,
             timestamp,
-            vehicle:vehicle_stock(marca, model),
+            vehicle:vehicle_stock(marca, model, photo_url),
             company:participant_companies(id, name),
             staff:staff(name)
         `)

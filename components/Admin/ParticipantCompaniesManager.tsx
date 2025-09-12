@@ -42,7 +42,7 @@ const emptyCollaborator: Omit<Collaborator, 'id' | 'createdAt'> = {
   photoUrl: 'https://aisfizoyfpcisykarrnt.supabase.co/storage/v1/object/public/molduras/Screenshot%202025-08-25%20182827.png'
 };
 
-const DEFAULT_VEHICLE_PHOTO = 'https://ngukhhydpltectxrmvot.supabase.co/storage/v1/object/public/imagens/WhatsApp%20Image%202025-09-10%20at%2023.55.44.jpeg';
+const DEFAULT_VEHICLE_PHOTO = 'https://ngukhhydpltectxrmvot.supabase.co/storage/v1/object/public/imagens/WhatsApp%20Image%202025-09-12%20at%2000.14.26.jpeg';
 
 // FIX: Added missing 'status' property to align with the Vehicle type definition.
 const emptyVehicle: Omit<Vehicle, 'id' | 'createdAt'> = {

@@ -13,6 +13,7 @@ import { UserRole } from './types';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import CollaboratorPage from './pages/CollaboratorPage';
+import OrganizerEventsPage from './pages/organizer/OrganizerEventsPage';
 
 const App: React.FC = () => {
   return (
@@ -37,6 +38,12 @@ const App: React.FC = () => {
                 </CollaboratorRoute>
               } />
               
+              <Route path="/organizer/events" element={
+                <ProtectedRoute roles={[UserRole.ORGANIZER]}>
+                  <OrganizerEventsPage />
+                </ProtectedRoute>
+              } />
+
               <Route path="/admin/events" element={
                 <MasterAdminRoute>
                   <EventsListPage />

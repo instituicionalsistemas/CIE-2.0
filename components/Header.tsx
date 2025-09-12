@@ -8,24 +8,14 @@ import LoadingSpinner from './LoadingSpinner';
 import { uploadImage, updateUserPhoto, updateCollaborator } from '../services/api';
 import { UserRole, Collaborator } from '../types';
 
-const ArrowDownIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-text-secondary" fill="none" viewBox="0 0 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-    </svg>
-);
-
 const Header: React.FC = () => {
-  const { isAuthenticated, user, logout, updateAuthUser, switchEvent } = useAuth();
+  const { isAuthenticated, user, logout, updateAuthUser } = useAuth();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const [isEventMenuOpen, setIsEventMenuOpen] = useState(false);
   const [staffInfo, setStaffInfo] = useState<{ name: string; photoUrl?: string; } | null>(null);
   const [collaboratorInfo, setCollaboratorInfo] = useState<Collaborator | null>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
-  const eventMenuRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
   const navigate = useNavigate();
-  const match = location.pathname.match(/\/admin\/event\/([^/]+)/);
-  const eventId = match ? match[1] : null;
   
   // Admin photo modal state
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
@@ -45,9 +35,6 @@ const Header: React.FC = () => {
     const handleClickOutside = (event: MouseEvent) => {
       if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
         setIsUserMenuOpen(false);
-      }
-      if (eventMenuRef.current && !eventMenuRef.current.contains(event.target as Node)) {
-        setIsEventMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -82,15 +69,6 @@ const Header: React.FC = () => {
         setCollaboratorInfo(null);
     }
   }, [location.pathname]);
-
-  const handleEventSwitch = (newEventId: string) => {
-    if (switchEvent) {
-      switchEvent(newEventId);
-    }
-    setIsEventMenuOpen(false);
-  };
-
-  const currentEvent = user?.events?.find(e => e.id === eventId);
 
   // --- Admin Photo Handlers ---
   const openPhotoModal = () => {
@@ -194,28 +172,6 @@ const Header: React.FC = () => {
           </h1>
         </div>
         <div className="flex items-center gap-2 sm:gap-4">
-          {isAuthenticated && user?.role === UserRole.ORGANIZER && user.events && user.events.length > 1 && (
-              <div className="relative" ref={eventMenuRef}>
-                  <button onClick={() => setIsEventMenuOpen(prev => !prev)} className="flex items-center gap-2 rounded-md p-2 hover:bg-secondary-hover transition-colors text-left max-w-[200px] sm:max-w-[250px]">
-                      <span className="font-semibold text-sm truncate">{currentEvent?.name || 'Selecionar Evento'}</span>
-                      <ArrowDownIcon />
-                  </button>
-                  {isEventMenuOpen && (
-                      <div className="absolute right-0 mt-2 w-56 bg-card rounded-md shadow-lg py-1 ring-1 ring-black ring-opacity-5 z-50">
-                          {user.events.map(event => (
-                              <button
-                                  key={event.id}
-                                  onClick={() => handleEventSwitch(event.id)}
-                                  className="w-full text-left px-4 py-2 text-sm text-text hover:bg-secondary-hover disabled:opacity-50 disabled:cursor-not-allowed"
-                                  disabled={event.id === eventId}
-                              >
-                                  {event.name}
-                              </button>
-                          ))}
-                      </div>
-                  )}
-              </div>
-          )}
           {isAuthenticated && user ? (
             <div className="relative" ref={userMenuRef}>
               <button onClick={() => setIsUserMenuOpen(prev => !prev)} className="flex items-center gap-2 rounded-full p-1 hover:bg-secondary-hover transition-colors">

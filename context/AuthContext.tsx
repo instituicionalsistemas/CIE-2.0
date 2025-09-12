@@ -1,3 +1,4 @@
+
 import React, { createContext, useState, useEffect, ReactNode, useContext, useCallback } from 'react';
 import { User, UserRole, Event } from '../types';
 import { apiLogin, apiLogout } from '../services/api';
@@ -37,10 +38,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       if (loggedInUser.role === UserRole.ADMIN && loggedInUser.isMaster) {
         navigate('/admin/events');
-      } else if (loggedInUser.role === UserRole.ORGANIZER && loggedInUser.eventId) {
-        navigate(`/admin/event/${loggedInUser.eventId}/dashboard`);
+      } else if (loggedInUser.role === UserRole.ORGANIZER) {
+        if (loggedInUser.events && loggedInUser.events.length > 1) {
+          navigate('/organizer/events');
+        } else if (loggedInUser.events && loggedInUser.events.length === 1) {
+          navigate(`/admin/event/${loggedInUser.events[0].id}/dashboard`);
+        } else {
+          // This case is handled by an error thrown from apiLogin, but as a fallback:
+          navigate('/'); 
+        }
       } else {
-        // Fallback for non-master admins or other roles
+        // Fallback for other roles or conditions
         navigate('/');
       }
     } catch (error) {

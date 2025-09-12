@@ -166,7 +166,16 @@ const StockReportView: React.FC<Props> = ({ eventId }) => {
                         {filteredMovements.map(m => (
                             <tr key={m.id} className="border-b border-border last:border-0 hover:bg-secondary/30 transition-colors">
                                 <td className="p-3"><MovementBadge type={m.type} /></td>
-                                <td className="p-3 font-semibold">{`${m.vehicle?.marca || 'N/D'} - ${m.vehicle?.model || 'N/D'}`}</td>
+                                <td className="p-3 font-semibold">
+                                    <div className="flex items-center gap-4">
+                                        <img
+                                            src={m.vehicle?.photoUrl || 'https://via.placeholder.com/100'}
+                                            alt={`${m.vehicle?.marca || ''} ${m.vehicle?.model || ''}`}
+                                            className="w-16 h-12 object-cover rounded-md bg-secondary flex-shrink-0"
+                                        />
+                                        <span>{`${m.vehicle?.marca || 'N/D'} - ${m.vehicle?.model || 'N/D'}`}</span>
+                                    </div>
+                                </td>
                                 <td className="p-3">{m.company?.name || 'N/D'}</td>
                                 <td className="p-3">{m.staff?.name || 'N/D'}</td>
                                 <td className="p-3 text-sm text-text-secondary">{new Date(m.timestamp).toLocaleString('pt-BR')}</td>

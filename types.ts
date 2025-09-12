@@ -171,6 +171,7 @@ export interface FullStockMovement {
   vehicle: {
     marca: string;
     model: string;
+    photoUrl?: string;
   } | null;
   company: {
     id: string;
