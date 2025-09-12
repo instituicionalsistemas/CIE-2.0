@@ -43,7 +43,9 @@ const ButtonsManager: React.FC = () => {
             getDepartmentsByEvent(eventId),
             getStaffByEvent(eventId)
         ]);
-        setButtons(buttonsData);
+        // Filter out internal config buttons so they don't show up in the manager UI
+        const userVisibleButtons = buttonsData.filter(b => !b.label.includes('_CONFIG'));
+        setButtons(userVisibleButtons);
         setDepartments(departmentsData);
         setStaffList(staffData);
     }
