@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
@@ -705,6 +706,64 @@ const InformesPage: React.FC = () => {
     };
 
   // --- Import Functions ---
+  const processParsedData = async (data: any[], fields: string[]) => {
+    if (!checkinInfo) return;
+
+    const requiredColumns = ['Marca', 'Modelo'];
+    const fileColumns = fields.map(f => f.trim());
+
+    if (!requiredColumns.every(col => fileColumns.includes(col))) {
+        setImportError(`O arquivo precisa conter as colunas obrigatórias: ${requiredColumns.join(', ')}.`);
+        setIsImporting(false);
+        return;
+    }
+
+    const newVehicles: Omit<Vehicle, 'id' | 'createdAt'>[] = data
+        .map((row: any) => {
+            const trimmedRow = Object.keys(row).reduce((acc, key) => {
+                acc[key.trim()] = row[key];
+                return acc;
+            }, {} as any);
+
+            const marca = trimmedRow['Marca']?.toString().trim();
+            const model = trimmedRow['Modelo']?.toString().trim();
+            if (!marca || !model) {
+                return null;
+            }
+            return {
+                marca,
+                model,
+                photoUrl: DEFAULT_VEHICLE_PHOTO,
+                status: 'Disponível',
+                companyId: checkinInfo.companyId,
+            };
+        })
+        .filter((v: any): v is Omit<Vehicle, 'id' | 'createdAt'> => v !== null);
+
+    if (newVehicles.length === 0) {
+        setImportError('Nenhum veículo válido encontrado na planilha.');
+        setIsImporting(false);
+        return;
+    }
+
+    try {
+        await apiBulkAddVehicles(newVehicles);
+        setImportSuccessMessage(`${newVehicles.length} veículo(s) importado(s) com sucesso!`);
+        
+        const updatedData = await getVehiclesByCompany(checkinInfo.companyId);
+        setVehicles(updatedData);
+
+        setTimeout(() => {
+            setIsImportModalOpen(false);
+        }, 2000);
+
+    } catch (error) {
+        setImportError('Ocorreu um erro ao importar os veículos.');
+    } finally {
+        setIsImporting(false);
+    }
+  };
+    
   const handleOpenImportModal = () => {
     setImportError(null);
     setImportSuccessMessage(null);
@@ -712,7 +771,7 @@ const InformesPage: React.FC = () => {
   };
 
   const handleDownloadTemplate = () => {
-      const headers = 'Marca,Modelo,"Foto (URL)",Status';
+      const headers = 'Marca,Modelo';
       const csvContent = "data:text/csv;charset=utf-8," + headers;
       const encodedUri = encodeURI(csvContent);
       const link = document.createElement("a");
@@ -729,65 +788,58 @@ const InformesPage: React.FC = () => {
     setImportError(null);
     setImportSuccessMessage(null);
 
-    (window as any).Papa.parse(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: async (results: any) => {
-            const requiredColumns = ['Marca', 'Modelo'];
-            const fileColumns = results.meta.fields;
+    const fileExtension = file.name.split('.').pop()?.toLowerCase();
 
-            if (!requiredColumns.every(col => fileColumns.includes(col))) {
-                setImportError(`O arquivo precisa conter as colunas obrigatórias: ${requiredColumns.join(', ')}.`);
+    if (fileExtension === 'csv') {
+        (window as any).Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (results: any) => {
+                if (results.errors.length > 0) {
+                    setImportError('Erro ao processar o arquivo CSV. Verifique o formato.');
+                    setIsImporting(false);
+                    return;
+                }
+                processParsedData(results.data, results.meta.fields);
+            },
+            error: (error: any) => {
+                setImportError('Falha ao ler o arquivo CSV.');
                 setIsImporting(false);
-                return;
             }
-
-            const newVehicles: Omit<Vehicle, 'id' | 'createdAt'>[] = results.data
-                .map((row: any) => {
-                    const marca = row['Marca']?.trim();
-                    const model = row['Modelo']?.trim();
-                    if (!marca || !model) {
-                        return null;
-                    }
-                    return {
-                        marca,
-                        model,
-                        photoUrl: row['Foto (URL)']?.trim() || DEFAULT_VEHICLE_PHOTO,
-                        status: ['Disponível', 'Vendido'].includes(row['Status']?.trim()) ? row['Status'].trim() : 'Disponível',
-                        companyId: checkinInfo.companyId,
-                    };
-                })
-                .filter((v: any): v is Omit<Vehicle, 'id' | 'createdAt'> => v !== null);
-
-            if (newVehicles.length === 0) {
-                setImportError('Nenhum veículo válido encontrado na planilha.');
-                setIsImporting(false);
-                return;
-            }
-
+        });
+    } else if (fileExtension === 'xls' || fileExtension === 'xlsx') {
+        const reader = new FileReader();
+        reader.onload = (event) => {
             try {
-                await apiBulkAddVehicles(newVehicles);
-                setImportSuccessMessage(`${newVehicles.length} veículo(s) importado(s) com sucesso!`);
-                
-                const data = await getVehiclesByCompany(checkinInfo.companyId);
-                setVehicles(data);
+                const data = event.target?.result;
+                const workbook = (window as any).XLSX.read(data, { type: 'array' });
+                const sheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[sheetName];
+                const jsonData = (window as any).XLSX.utils.sheet_to_json(worksheet);
 
-                setTimeout(() => {
-                    setIsImportModalOpen(false);
-                }, 2000);
-
-            } catch (error) {
-                setImportError('Ocorreu um erro ao importar os veículos.');
-            } finally {
-                setIsImporting(false);
+                if (jsonData.length === 0) {
+                    setImportError('A planilha está vazia ou mal formatada.');
+                    setIsImporting(false);
+                    return;
+                }
+                const headers = Object.keys(jsonData[0]);
+                processParsedData(jsonData, headers);
+            } catch (err) {
+                 setImportError('Erro ao processar a planilha. Verifique se o formato está correto.');
+                 setIsImporting(false);
             }
-        },
-        error: (error: any) => {
-            setImportError('Falha ao ler o arquivo CSV.');
+        };
+        reader.onerror = () => {
+            setImportError('Não foi possível ler o arquivo.');
             setIsImporting(false);
-        }
-    });
+        };
+        reader.readAsArrayBuffer(file);
+    } else {
+        setImportError('Formato de arquivo não suportado. Use .csv, .xls ou .xlsx.');
+        setIsImporting(false);
+    }
   };
+
 
     // --- Stock Control Functions ---
     const handleOpenStockControlModal = async () => {
@@ -1429,13 +1481,13 @@ const InformesPage: React.FC = () => {
       {/* Import Modal */}
       <Modal isOpen={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} title="Importar Estoque via Planilha">
           <div className="space-y-4">
-              <p className="text-text-secondary">Envie um arquivo <code className="bg-background text-primary px-1 rounded">.csv</code> com as colunas: <code className="bg-background text-primary px-1 rounded">Marca</code> (obrigatório), <code className="bg-background text-primary px-1 rounded">Modelo</code> (obrigatório), <code className="bg-background text-primary px-1 rounded">Foto (URL)</code> (opcional) e <code className="bg-background text-primary px-1 rounded">Status</code> (opcional, padrão 'Disponível').</p>
+              <p className="text-text-secondary">Envie um arquivo <code className="bg-background text-primary px-1 rounded">.csv, .xls ou .xlsx</code> com as colunas: <code className="bg-background text-primary px-1 rounded">Marca</code> (obrigatório), <code className="bg-background text-primary px-1 rounded">Modelo</code> (obrigatório)</p>
               
-              <Button onClick={handleDownloadTemplate} variant="secondary" className="w-full">Baixar Planilha Modelo</Button>
+              <Button onClick={handleDownloadTemplate} variant="secondary" className="w-full">Baixar Planilha Modelo (.csv)</Button>
               
               <input 
                   type="file"
-                  accept=".csv"
+                  accept=".csv,.xls,.xlsx"
                   onChange={(e) => e.target.files && handleFileImport(e.target.files[0])}
                   className="w-full text-sm text-text-secondary file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-black hover:file:bg-primary-dark"
                   disabled={isImporting}

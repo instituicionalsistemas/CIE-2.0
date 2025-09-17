@@ -31,7 +31,6 @@ const emptyCompany: Omit<ParticipantCompany, 'id'> = {
   name: '', boothCode: '', buttonIds: [], responsible: '', contact: '', responsiblePhone: '', eventId: '', logoUrl: ''
 };
 
-// FIX: Added missing 'companyId' property to the `emptyCollaborator` object and updated its type to `Omit<Collaborator, 'id' | 'createdAt'>`. This resolves a TypeScript error where the initial value for the `currentCollaborator` state was missing a required property defined in its type annotation.
 const emptyCollaborator: Omit<Collaborator, 'id' | 'createdAt'> = {
   name: '',
   collaboratorCode: '',
@@ -44,7 +43,6 @@ const emptyCollaborator: Omit<Collaborator, 'id' | 'createdAt'> = {
 
 const DEFAULT_VEHICLE_PHOTO = 'https://ngukhhydpltectxrmvot.supabase.co/storage/v1/object/public/imagens/WhatsApp%20Image%202025-09-12%20at%2000.14.26.jpeg';
 
-// FIX: Added missing 'status' property to align with the Vehicle type definition.
 const emptyVehicle: Omit<Vehicle, 'id' | 'createdAt'> = {
   marca: '',
   model: '',
@@ -65,9 +63,20 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoFileName, setLogoFileName] = useState('');
+  
+  const [companyStats, setCompanyStats] = useState<Record<string, { collaborators: number; stock: number }>>({});
+
+
+  // State for card interactions
+  const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
+  
+  // State for choice modals
+  const [isCollaboratorChoiceModalOpen, setIsCollaboratorChoiceModalOpen] = useState(false);
+  const [isStockChoiceModalOpen, setIsStockChoiceModalOpen] = useState(false);
 
   // State for Collaborators Modal
   const [isCollaboratorModalOpen, setIsCollaboratorModalOpen] = useState(false);
+  const [collaboratorModalMode, setCollaboratorModalMode] = useState<'add' | 'view'>('add');
   const [selectedCompany, setSelectedCompany] = useState<ParticipantCompany | null>(null);
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [collaboratorsLoading, setCollaboratorsLoading] = useState(false);
@@ -75,6 +84,7 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
   const [collaboratorToDelete, setCollaboratorToDelete] = useState<string | null>(null);
   const [isConfirmCollaboratorDeleteOpen, setIsConfirmCollaboratorDeleteOpen] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [collaboratorSearchTerm, setCollaboratorSearchTerm] = useState('');
   
   const [currentCollaborator, setCurrentCollaborator] = useState<Omit<Collaborator, 'id' | 'createdAt'> | Collaborator>(emptyCollaborator);
   const [isEditingCollaborator, setIsEditingCollaborator] = useState(false);
@@ -82,6 +92,7 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
 
   // State for Vehicle Stock Modal
   const [isVehicleModalOpen, setIsVehicleModalOpen] = useState(false);
+  const [stockModalMode, setStockModalMode] = useState<'add' | 'view'>('add');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [vehiclesLoading, setVehiclesLoading] = useState(false);
   const [currentVehicle, setCurrentVehicle] = useState<Omit<Vehicle, 'id' | 'createdAt'> | Vehicle>(emptyVehicle);
@@ -90,6 +101,8 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
   const [isSubmittingVehicle, setIsSubmittingVehicle] = useState(false);
   const [vehicleToDelete, setVehicleToDelete] = useState<string | null>(null);
   const [isConfirmVehicleDeleteOpen, setIsConfirmVehicleDeleteOpen] = useState(false);
+  const [vehicleSearchTerm, setVehicleSearchTerm] = useState('');
+
 
   // State for Import Modal
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -119,6 +132,33 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (companies.length > 0) {
+        const fetchStats = async () => {
+            const statsPromises = companies.map(async (company) => {
+                const [collaboratorsData, vehiclesData] = await Promise.all([
+                    getCollaboratorsByCompany(company.id),
+                    getVehiclesByCompany(company.id)
+                ]);
+                return {
+                    companyId: company.id,
+                    stats: {
+                        collaborators: collaboratorsData.length,
+                        stock: vehiclesData.length
+                    }
+                };
+            });
+            const results = await Promise.all(statsPromises);
+            const statsMap = results.reduce((acc, result) => {
+                acc[result.companyId] = result.stats;
+                return acc;
+            }, {} as Record<string, { collaborators: number; stock: number }>);
+            setCompanyStats(statsMap);
+        };
+        fetchStats();
+    }
+  }, [companies]);
 
   // Effect to fetch collaborators when a company is selected
   useEffect(() => {
@@ -247,10 +287,15 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
     }
   };
 
+  // --- Card Interaction ---
+  const handleCardClick = (companyId: string) => {
+    const isOpening = activeCompanyId !== companyId;
+    setActiveCompanyId(isOpening ? companyId : null);
+  };
+
   // --- Collaborator Functions ---
   const handleOpenCollaboratorsModal = (company: ParticipantCompany) => {
     setSelectedCompany(company);
-    handleAddNewCollaborator(); // Resets form
     setIsCollaboratorModalOpen(true);
   };
 
@@ -258,6 +303,7 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
     setIsCollaboratorModalOpen(false);
     setSelectedCompany(null);
     setCollaborators([]);
+    setCollaboratorSearchTerm('');
   };
   
   const handleCollaboratorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -276,7 +322,13 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
     setCurrentCollaborator(collaborator);
     setIsEditingCollaborator(true);
     setPhotoFile(null);
+    setCollaboratorModalMode('add');
     document.getElementById('collaborator-modal-content')?.scrollTo(0, 0);
+  };
+
+  const handleCancelEditCollaborator = () => {
+      handleAddNewCollaborator(); // Resets state
+      setCollaboratorModalMode('view');
   };
 
   const handleSubmitCollaborator = async (e: React.FormEvent) => {
@@ -300,6 +352,10 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
         
         const data = await getCollaboratorsByCompany(selectedCompany.id);
         setCollaborators(data);
+
+        if(isEditingCollaborator) {
+            setCollaboratorModalMode('view');
+        }
         handleAddNewCollaborator(); // Reset form for next entry
         
     } catch (error) {
@@ -332,9 +388,6 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
   // --- Vehicle Functions ---
     const handleOpenVehicleModal = (company: ParticipantCompany) => {
         setSelectedCompany(company);
-        setCurrentVehicle({ ...emptyVehicle, companyId: company.id });
-        setIsEditingVehicle(false);
-        setVehiclePhotoFile(null);
         setIsVehicleModalOpen(true);
     };
 
@@ -343,6 +396,7 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
         setIsVehicleModalOpen(false);
         setSelectedCompany(null);
         setVehicles([]);
+        setVehicleSearchTerm('');
     };
 
     const handleVehicleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -362,19 +416,23 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
         }
     };
 
+    const handleAddNewVehicle = () => {
+        setCurrentVehicle({ ...emptyVehicle, companyId: selectedCompany?.id || '' });
+        setIsEditingVehicle(false);
+        setVehiclePhotoFile(null);
+    };
+
     const handleEditVehicle = (vehicle: Vehicle) => {
         setCurrentVehicle(vehicle);
         setIsEditingVehicle(true);
         setVehiclePhotoFile(null);
+        setStockModalMode('add');
         document.getElementById('vehicle-modal-content')?.scrollTo(0, 0);
     };
 
     const handleCancelEditVehicle = () => {
-        if (selectedCompany) {
-            setCurrentVehicle({ ...emptyVehicle, companyId: selectedCompany.id });
-        }
-        setIsEditingVehicle(false);
-        setVehiclePhotoFile(null);
+        handleAddNewVehicle();
+        setStockModalMode('view');
     };
 
     const handleVehicleSubmit = async (e: React.FormEvent) => {
@@ -396,9 +454,13 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
                 await addVehicle(vehicleData as Omit<Vehicle, 'id' | 'createdAt'>);
             }
 
-            handleCancelEditVehicle();
             const data = await getVehiclesByCompany(selectedCompany.id);
             setVehicles(data);
+
+            if (isEditingVehicle) {
+                setStockModalMode('view');
+            }
+            handleAddNewVehicle();
 
         } catch (error) {
             console.error("Failed to save vehicle", error);
@@ -484,6 +546,63 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
     };
 
     // --- Import Functions ---
+    const processParsedData = async (data: any[], fields: string[]) => {
+        if (!selectedCompany) return;
+
+        const requiredColumns = ['Marca', 'Modelo'];
+        const fileColumns = fields.map(f => f.trim());
+
+        if (!requiredColumns.every(col => fileColumns.includes(col))) {
+            setImportError(`O arquivo precisa conter as colunas obrigatórias: ${requiredColumns.join(', ')}.`);
+            setIsImporting(false);
+            return;
+        }
+
+        const newVehicles: Omit<Vehicle, 'id' | 'createdAt'>[] = data
+            .map((row: any) => {
+                const trimmedRow = Object.keys(row).reduce((acc, key) => {
+                    acc[key.trim()] = row[key];
+                    return acc;
+                }, {} as any);
+                const marca = trimmedRow['Marca']?.toString().trim();
+                const model = trimmedRow['Modelo']?.toString().trim();
+                if (!marca || !model) {
+                    return null;
+                }
+                return {
+                    marca,
+                    model,
+                    photoUrl: DEFAULT_VEHICLE_PHOTO,
+                    status: 'Disponível',
+                    companyId: selectedCompany.id,
+                };
+            })
+            .filter((v: any): v is Omit<Vehicle, 'id' | 'createdAt'> => v !== null);
+
+        if (newVehicles.length === 0) {
+            setImportError('Nenhum veículo válido encontrado na planilha.');
+            setIsImporting(false);
+            return;
+        }
+
+        try {
+            await apiBulkAddVehicles(newVehicles);
+            setImportSuccessMessage(`${newVehicles.length} veículo(s) importado(s) com sucesso!`);
+            
+            const updatedData = await getVehiclesByCompany(selectedCompany.id);
+            setVehicles(updatedData);
+
+            setTimeout(() => {
+                setIsImportModalOpen(false);
+            }, 2000);
+
+        } catch (error) {
+            setImportError('Ocorreu um erro ao importar os veículos.');
+        } finally {
+            setIsImporting(false);
+        }
+    };
+
     const handleOpenImportModal = () => {
         setImportError(null);
         setImportSuccessMessage(null);
@@ -491,7 +610,7 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
     };
 
     const handleDownloadTemplate = () => {
-        const headers = 'Marca,Modelo,"Foto (URL)",Status';
+        const headers = 'Marca,Modelo';
         const csvContent = "data:text/csv;charset=utf-8," + headers;
         const encodedUri = encodeURI(csvContent);
         const link = document.createElement("a");
@@ -508,64 +627,56 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
         setImportError(null);
         setImportSuccessMessage(null);
 
-        (window as any).Papa.parse(file, {
-            header: true,
-            skipEmptyLines: true,
-            complete: async (results: any) => {
-                const requiredColumns = ['Marca', 'Modelo'];
-                const fileColumns = results.meta.fields;
+        const fileExtension = file.name.split('.').pop()?.toLowerCase();
 
-                if (!requiredColumns.every(col => fileColumns.includes(col))) {
-                    setImportError(`O arquivo precisa conter as colunas obrigatórias: ${requiredColumns.join(', ')}.`);
+        if (fileExtension === 'csv') {
+            (window as any).Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                complete: (results: any) => {
+                    if (results.errors.length > 0) {
+                        setImportError('Erro ao processar o arquivo CSV. Verifique o formato.');
+                        setIsImporting(false);
+                        return;
+                    }
+                    processParsedData(results.data, results.meta.fields);
+                },
+                error: (error: any) => {
+                    setImportError('Falha ao ler o arquivo CSV.');
                     setIsImporting(false);
-                    return;
                 }
-
-                const newVehicles: Omit<Vehicle, 'id' | 'createdAt'>[] = results.data
-                    .map((row: any) => {
-                        const marca = row['Marca']?.trim();
-                        const model = row['Modelo']?.trim();
-                        if (!marca || !model) {
-                            return null;
-                        }
-                        return {
-                            marca,
-                            model,
-                            photoUrl: row['Foto (URL)']?.trim() || DEFAULT_VEHICLE_PHOTO,
-                            status: ['Disponível', 'Vendido'].includes(row['Status']?.trim()) ? row['Status'].trim() : 'Disponível',
-                            companyId: selectedCompany.id,
-                        };
-                    })
-                    .filter((v: any): v is Omit<Vehicle, 'id' | 'createdAt'> => v !== null);
-
-                if (newVehicles.length === 0) {
-                    setImportError('Nenhum veículo válido encontrado na planilha.');
-                    setIsImporting(false);
-                    return;
-                }
-
+            });
+        } else if (fileExtension === 'xls' || fileExtension === 'xlsx') {
+            const reader = new FileReader();
+            reader.onload = (event) => {
                 try {
-                    await apiBulkAddVehicles(newVehicles);
-                    setImportSuccessMessage(`${newVehicles.length} veículo(s) importado(s) com sucesso!`);
-                    
-                    const data = await getVehiclesByCompany(selectedCompany.id);
-                    setVehicles(data);
+                    const data = event.target?.result;
+                    const workbook = (window as any).XLSX.read(data, { type: 'array' });
+                    const sheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    const jsonData = (window as any).XLSX.utils.sheet_to_json(worksheet);
 
-                    setTimeout(() => {
-                        setIsImportModalOpen(false);
-                    }, 2000);
-
-                } catch (error) {
-                    setImportError('Ocorreu um erro ao importar os veículos.');
-                } finally {
-                    setIsImporting(false);
+                    if (jsonData.length === 0) {
+                        setImportError('A planilha está vazia ou mal formatada.');
+                        setIsImporting(false);
+                        return;
+                    }
+                    const headers = Object.keys(jsonData[0]);
+                    processParsedData(jsonData, headers);
+                } catch (err) {
+                     setImportError('Erro ao processar a planilha. Verifique se o formato está correto.');
+                     setIsImporting(false);
                 }
-            },
-            error: (error: any) => {
-                setImportError('Falha ao ler o arquivo CSV.');
+            };
+            reader.onerror = () => {
+                setImportError('Não foi possível ler o arquivo.');
                 setIsImporting(false);
-            }
-        });
+            };
+            reader.readAsArrayBuffer(file);
+        } else {
+            setImportError('Formato de arquivo não suportado. Use .csv, .xls ou .xlsx.');
+            setIsImporting(false);
+        }
     };
 
 
@@ -577,6 +688,20 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
     ),
     [companies, searchTerm]
   );
+  
+  const filteredCollaborators = useMemo(() => {
+    return collaborators.filter(c =>
+        c.name.toLowerCase().includes(collaboratorSearchTerm.toLowerCase()) ||
+        c.collaboratorCode.toLowerCase().includes(collaboratorSearchTerm.toLowerCase())
+    );
+  }, [collaborators, collaboratorSearchTerm]);
+
+  const filteredVehicles = useMemo(() => {
+    return vehicles.filter(v =>
+        v.marca.toLowerCase().includes(vehicleSearchTerm.toLowerCase()) ||
+        v.model.toLowerCase().includes(vehicleSearchTerm.toLowerCase())
+    );
+  }, [vehicles, vehicleSearchTerm]);
 
   if (loading) return <LoadingSpinner />;
 
@@ -592,10 +717,17 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredCompanies.map(company => {
           const companyButtons = allButtons.filter(b => company.buttonIds.includes(b.id));
+          const isActive = activeCompanyId === company.id;
+          const stats = companyStats[company.id] || { collaborators: 0, stock: 0 };
+
 
           return (
-            <div key={company.id} className="bg-card p-5 rounded-lg shadow-md flex flex-col justify-between">
-              <div className="flex-grow">
+            <div 
+                key={company.id} 
+                className={`bg-card p-5 rounded-lg shadow-md flex flex-col justify-between transition-all duration-300 ${isActive ? 'ring-2 ring-primary' : 'ring-2 ring-transparent'}`}
+                onClick={() => handleCardClick(company.id)}
+            >
+              <div className="flex-grow cursor-pointer">
                 <div className="flex items-start gap-4 mb-3">
                   <img src={company.logoUrl || 'https://via.placeholder.com/150?text=Logo'} alt={`${company.name} logo`} className="w-16 h-16 object-contain rounded-md bg-secondary p-1 flex-shrink-0" />
                   <div className="flex-grow overflow-hidden">
@@ -607,6 +739,11 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
                 <p><strong>Responsável:</strong> {company.responsible || 'N/D'}</p>
                 <p><strong>Email:</strong> {company.contact || 'N/D'}</p>
                 <p className="mb-3"><strong>Telefone:</strong> {company.responsiblePhone || 'N/D'}</p>
+
+                <div className="flex justify-between text-sm mt-3 font-semibold">
+                    <p>Colaboradores: <span className="text-primary">{stats.collaborators}</span></p>
+                    <p>Estoque: <span className="text-primary">{stats.stock}</span></p>
+                </div>
                 
                 <div className="border-t border-border pt-3 mt-3">
                     <h4 className="font-semibold mb-2 text-sm">Botões de Ação:</h4>
@@ -623,12 +760,18 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
                     )}
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-border flex-shrink-0">
-                <Button variant="secondary" onClick={() => handleOpenModal(company)} className="text-sm w-full">Editar</Button>
-                <Button variant="secondary" onClick={() => handleOpenCollaboratorsModal(company)} className="text-sm w-full">Colaboradores</Button>
-                <Button variant="secondary" onClick={() => handleOpenVehicleModal(company)} className="text-sm w-full">Estoque</Button>
-                <Button variant="danger" onClick={() => handleDeleteClick(company.id)} className="text-sm w-full col-span-3">Excluir</Button>
-              </div>
+              
+              {isActive && (
+                 <div className="mt-4 pt-4 border-t border-border flex-shrink-0 animate-fade-in" onClick={(e) => e.stopPropagation()}>
+                    <div className="grid grid-cols-2 gap-2">
+                        <Button variant="secondary" onClick={() => handleOpenModal(company)} className="text-sm w-full">Editar</Button>
+                        <Button variant="danger" onClick={() => handleDeleteClick(company.id)} className="text-sm w-full">Excluir</Button>
+                        <Button variant="secondary" onClick={() => { setSelectedCompany(company); setIsCollaboratorChoiceModalOpen(true); }} className="text-sm w-full col-span-2">Colaboradores</Button>
+                        <Button variant="secondary" onClick={() => { setSelectedCompany(company); setIsStockChoiceModalOpen(true); }} className="text-sm w-full col-span-2">Estoque</Button>
+                    </div>
+                 </div>
+              )}
+
             </div>
           )
         })}
@@ -669,7 +812,9 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
           <div>
             <h4 className="font-semibold mb-2">Botões de Ação Associados</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-2">
-                {allButtons.map(button => (
+                {allButtons
+                  .filter(button => !button.label.startsWith('__'))
+                  .map(button => (
                     <label key={button.id} className="flex items-center gap-2 p-2 rounded-md bg-secondary">
                         <input
                             type="checkbox"
@@ -690,61 +835,129 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
         </form>
       </Modal>
 
-      {/* Collaborators Modal */}
-      <Modal isOpen={isCollaboratorModalOpen} onClose={handleCloseCollaboratorsModal} title={`Colaboradores de ${selectedCompany?.name}`}>
-        <div id="collaborator-modal-content" className="space-y-6 max-h-[70vh] overflow-y-auto">
-          <form onSubmit={handleSubmitCollaborator} className="space-y-4 p-4 border border-border rounded-lg bg-secondary">
-              <h3 className="text-lg font-semibold">{isEditingCollaborator ? 'Editar Colaborador' : 'Adicionar Novo Colaborador'}</h3>
-              <div className="flex items-center gap-4">
-                  <img src={currentCollaborator.photoUrl || 'https://via.placeholder.com/150'} alt="Preview" className="w-16 h-16 rounded-full object-cover"/>
-                  <div>
-                      <label htmlFor="collaborator-photo-upload" className="cursor-pointer bg-secondary hover:bg-secondary-hover text-text font-bold py-2 px-4 rounded-lg transition-colors text-sm">
-                          Escolher Foto
-                      </label>
-                      <input id="collaborator-photo-upload" type="file" accept="image/*" onChange={handlePhotoFileChange} className="hidden" />
-                  </div>
-              </div>
-              <Input id="name" name="name" label="Nome Completo" value={currentCollaborator.name} onChange={handleCollaboratorChange} required />
-              <Input id="collaboratorCode" name="collaboratorCode" label="Código do Colaborador" value={currentCollaborator.collaboratorCode} onChange={handleCollaboratorChange} required />
-              <Input id="role" name="role" label="Cargo / Função" value={currentCollaborator.role || ''} onChange={handleCollaboratorChange} />
-              <Input id="email" name="email" label="Email" type="email" value={currentCollaborator.email || ''} onChange={handleCollaboratorChange} />
-              <Input id="phone" name="phone" label="Telefone" type="tel" value={currentCollaborator.phone || ''} onChange={handleCollaboratorChange} />
-
-              <div className="flex justify-end gap-2">
-                  {isEditingCollaborator && <Button type="button" variant="secondary" onClick={handleAddNewCollaborator}>Cancelar Edição</Button>}
-                  <Button type="submit" disabled={isSubmittingCollaborator}>
-                      {isSubmittingCollaborator ? <div className="flex justify-center items-center h-5 w-32"><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-black"></div></div> : (isEditingCollaborator ? 'Salvar Alterações' : 'Adicionar Colaborador')}
-                  </Button>
-              </div>
-          </form>
-
-          <div className="border-t border-border pt-4">
-            <h4 className="font-semibold mb-2">Colaboradores Cadastrados</h4>
-            <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
-              {collaboratorsLoading ? <LoadingSpinner /> : (
-                collaborators.length > 0 ? collaborators.map(collab => (
-                  <div key={collab.id} className="flex justify-between items-center p-2 bg-secondary rounded-md">
-                    <div className="flex items-center gap-3 flex-grow overflow-hidden">
-                        <img src={collab.photoUrl || 'https://via.placeholder.com/150'} alt={collab.collaboratorCode} className="w-10 h-10 rounded-full object-cover" />
-                        <div className="truncate">
-                          <p className="font-semibold truncate">{collab.name}</p>
-                          <p className="text-sm text-text-secondary truncate">{collab.collaboratorCode}</p>
-                        </div>
-                    </div>
-                    <div className="flex gap-2 flex-shrink-0">
-                      <Button variant="secondary" className="py-1 px-2 text-xs" onClick={() => handleEditCollaborator(collab)}>Editar</Button>
-                      <Button variant="danger" className="py-1 px-2 text-xs" onClick={() => handleDeleteCollaboratorClick(collab.id)}>Excluir</Button>
-                    </div>
-                  </div>
-                )) : <p className="text-center text-text-secondary py-4">Nenhum colaborador cadastrado.</p>
-              )}
-            </div>
+      {/* Collaborator Choice Modal */}
+      <Modal isOpen={isCollaboratorChoiceModalOpen} onClose={() => setIsCollaboratorChoiceModalOpen(false)} title={`Gerenciar Colaboradores de ${selectedCompany?.name}`}>
+          <div className="flex flex-col gap-4">
+              <p className="text-center text-text-secondary">O que você gostaria de fazer?</p>
+              <Button onClick={() => {
+                  setCollaboratorModalMode('add');
+                  handleAddNewCollaborator();
+                  setIsCollaboratorChoiceModalOpen(false);
+                  handleOpenCollaboratorsModal(selectedCompany!);
+              }} className="w-full text-lg py-3">
+                  Adicionar Colaborador
+              </Button>
+              <Button onClick={() => {
+                  setCollaboratorModalMode('view');
+                  setCollaboratorSearchTerm('');
+                  setIsCollaboratorChoiceModalOpen(false);
+                  handleOpenCollaboratorsModal(selectedCompany!);
+              }} variant="secondary" className="w-full text-lg py-3">
+                  Ver Colaboradores
+              </Button>
           </div>
+      </Modal>
+
+      {/* Stock Choice Modal */}
+      <Modal isOpen={isStockChoiceModalOpen} onClose={() => setIsStockChoiceModalOpen(false)} title={`Gerenciar Estoque de ${selectedCompany?.name}`}>
+          <div className="flex flex-col gap-4">
+              <p className="text-center text-text-secondary">O que você gostaria de fazer?</p>
+              <Button onClick={() => {
+                  setStockModalMode('add');
+                  handleAddNewVehicle();
+                  setIsStockChoiceModalOpen(false);
+                  handleOpenVehicleModal(selectedCompany!);
+              }} className="w-full text-lg py-3">
+                  Adicionar Estoque
+              </Button>
+              <Button onClick={() => {
+                  setStockModalMode('view');
+                  setVehicleSearchTerm('');
+                  setIsStockChoiceModalOpen(false);
+                  handleOpenVehicleModal(selectedCompany!);
+              }} variant="secondary" className="w-full text-lg py-3">
+                  Ver Estoque
+              </Button>
+          </div>
+      </Modal>
+
+
+      {/* Collaborators Modal */}
+      <Modal 
+        isOpen={isCollaboratorModalOpen} 
+        onClose={handleCloseCollaboratorsModal} 
+        title={collaboratorModalMode === 'add' ? (isEditingCollaborator ? `Editar Colaborador` : `Adicionar Colaborador para ${selectedCompany?.name}`) : `Colaboradores de ${selectedCompany?.name}`}
+      >
+        <div id="collaborator-modal-content" className="space-y-6 max-h-[70vh] overflow-y-auto">
+          {collaboratorModalMode === 'add' && (
+              <form onSubmit={handleSubmitCollaborator} className="space-y-4 p-4 border-t border-border bg-secondary rounded-b-lg">
+                  <div className="flex items-center gap-4">
+                      <img src={currentCollaborator.photoUrl || 'https://via.placeholder.com/150'} alt="Preview" className="w-16 h-16 rounded-full object-cover"/>
+                      <div>
+                          <label htmlFor="collaborator-photo-upload" className="cursor-pointer bg-secondary hover:bg-secondary-hover text-text font-bold py-2 px-4 rounded-lg transition-colors text-sm">
+                              Escolher Foto
+                          </label>
+                          <input id="collaborator-photo-upload" type="file" accept="image/*" onChange={handlePhotoFileChange} className="hidden" />
+                      </div>
+                  </div>
+                  <Input id="name" name="name" label="Nome Completo" value={currentCollaborator.name} onChange={handleCollaboratorChange} required />
+                  <Input id="collaboratorCode" name="collaboratorCode" label="Código do Colaborador" value={currentCollaborator.collaboratorCode} onChange={handleCollaboratorChange} required />
+                  <Input id="role" name="role" label="Cargo / Função" value={currentCollaborator.role || ''} onChange={handleCollaboratorChange} />
+                  <Input id="email" name="email" label="Email" type="email" value={currentCollaborator.email || ''} onChange={handleCollaboratorChange} />
+                  <Input id="phone" name="phone" label="Telefone" type="tel" value={currentCollaborator.phone || ''} onChange={handleCollaboratorChange} />
+
+                  <div className="flex justify-end gap-2">
+                      {isEditingCollaborator && <Button type="button" variant="secondary" onClick={handleCancelEditCollaborator}>Cancelar Edição</Button>}
+                      <Button type="submit" disabled={isSubmittingCollaborator}>
+                          {isSubmittingCollaborator ? <div className="flex justify-center items-center h-5 w-32"><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-black"></div></div> : (isEditingCollaborator ? 'Salvar Alterações' : 'Adicionar Colaborador')}
+                      </Button>
+                  </div>
+              </form>
+          )}
+
+          {collaboratorModalMode === 'view' && (
+            <div className="border-t border-border pt-4">
+              <div className="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4">
+                <Input
+                    id="collaborator-search"
+                    label=""
+                    placeholder="Buscar por nome ou código..."
+                    value={collaboratorSearchTerm}
+                    onChange={(e) => setCollaboratorSearchTerm(e.target.value)}
+                    className="flex-grow w-full sm:w-auto mb-0"
+                />
+                <Button onClick={() => { handleAddNewCollaborator(); setCollaboratorModalMode('add'); }} className="w-full sm:w-auto">Adicionar Novo</Button>
+              </div>
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
+                {collaboratorsLoading ? <LoadingSpinner /> : (
+                  filteredCollaborators.length > 0 ? filteredCollaborators.map(collab => (
+                    <div key={collab.id} className="flex justify-between items-center p-2 bg-secondary rounded-md">
+                      <div className="flex items-center gap-3 flex-grow overflow-hidden">
+                          <img src={collab.photoUrl || 'https://via.placeholder.com/150'} alt={collab.collaboratorCode} className="w-10 h-10 rounded-full object-cover" />
+                          <div className="truncate">
+                            <p className="font-semibold truncate">{collab.name}</p>
+                            <p className="text-sm text-text-secondary truncate">{collab.collaboratorCode}</p>
+                          </div>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        <Button variant="secondary" className="py-1 px-2 text-xs" onClick={() => handleEditCollaborator(collab)}>Editar</Button>
+                        <Button variant="danger" className="py-1 px-2 text-xs" onClick={() => handleDeleteCollaboratorClick(collab.id)}>Excluir</Button>
+                      </div>
+                    </div>
+                  )) : <p className="text-center text-text-secondary py-4">Nenhum colaborador encontrado.</p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </Modal>
       
       {/* Vehicle Stock Modal */}
-      <Modal isOpen={isVehicleModalOpen} onClose={handleCloseVehicleModal} title={`Estoque de Veículos de ${selectedCompany?.name}`}>
+      <Modal 
+        isOpen={isVehicleModalOpen} 
+        onClose={handleCloseVehicleModal} 
+        title={stockModalMode === 'add' ? (isEditingVehicle ? 'Editar Veículo' : `Adicionar Veículo para ${selectedCompany?.name}`) : `Estoque de ${selectedCompany?.name}`}
+      >
         {isCameraOpen && (
             <div className="absolute inset-0 bg-black bg-opacity-90 z-10 flex flex-col items-center justify-center p-4">
             <video ref={videoRef} autoPlay playsInline className="w-full max-w-md rounded-lg mb-4"></video>
@@ -756,68 +969,81 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
             </div>
         )}
         <div id="vehicle-modal-content" className="space-y-6 max-h-[70vh] overflow-y-auto">
-            <div className="flex justify-end">
-              <Button variant="secondary" onClick={handleOpenImportModal}>Importar Planilha</Button>
-            </div>
-            <form onSubmit={handleVehicleSubmit} className="p-4 border border-border rounded-lg space-y-4 bg-secondary">
-                <h3 className="text-lg font-semibold">{isEditingVehicle ? 'Editar Veículo' : 'Adicionar Novo Veículo'}</h3>
-                <div className="flex flex-col md:flex-row gap-4 items-center">
-                    <div className="flex-shrink-0">
-                    <img src={(currentVehicle as Vehicle).photoUrl || DEFAULT_VEHICLE_PHOTO} alt="Preview" className="w-24 h-24 md:w-32 md:h-32 rounded-lg object-cover bg-background" />
+            {stockModalMode === 'add' && (
+                <form onSubmit={handleVehicleSubmit} className="p-4 border-t border-border rounded-b-lg space-y-4 bg-secondary">
+                    <div className="flex flex-col md:flex-row gap-4 items-center">
+                        <div className="flex-shrink-0">
+                        <img src={(currentVehicle as Vehicle).photoUrl || DEFAULT_VEHICLE_PHOTO} alt="Preview" className="w-24 h-24 md:w-32 md:h-32 rounded-lg object-cover bg-background" />
+                        </div>
+                        <div className="flex-grow space-y-2 w-full">
+                        <Button type="button" onClick={startCamera} className="w-full">Tirar Foto</Button>
+                        <label htmlFor="vehicle-photo-upload" className="cursor-pointer w-full inline-block text-center bg-secondary hover:bg-secondary-hover text-text font-bold py-2 px-4 rounded-lg transition-colors">
+                            Enviar Arquivo
+                        </label>
+                        <input id="vehicle-photo-upload" type="file" accept="image/*" onChange={handleVehiclePhotoFileChange} className="hidden" />
+                        </div>
                     </div>
-                    <div className="flex-grow space-y-2 w-full">
-                    <Button type="button" onClick={startCamera} className="w-full">Tirar Foto</Button>
-                    <label htmlFor="vehicle-photo-upload" className="cursor-pointer w-full inline-block text-center bg-secondary hover:bg-secondary-hover text-text font-bold py-2 px-4 rounded-lg transition-colors">
-                        Enviar Arquivo
-                    </label>
-                    <input id="vehicle-photo-upload" type="file" accept="image/*" onChange={handleVehiclePhotoFileChange} className="hidden" />
+                    <Input id="vehicle-marca" name="marca" label="Marca do Veículo" value={(currentVehicle as Vehicle).marca} onChange={handleVehicleChange} required />
+                    <Input id="vehicle-model" name="model" label="Modelo" value={(currentVehicle as Vehicle).model} onChange={handleVehicleChange} required />
+                    <div className="flex justify-end gap-2">
+                        {isEditingVehicle && <Button type="button" variant="secondary" onClick={handleCancelEditVehicle}>Cancelar Edição</Button>}
+                        <Button type="submit" disabled={isSubmittingVehicle}>
+                            {isSubmittingVehicle ? <div className="flex justify-center items-center h-5 w-36"><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-black"></div></div> : (isEditingVehicle ? 'Salvar Alterações' : 'Adicionar Veículo')}
+                        </Button>
                     </div>
-                </div>
-                <Input id="vehicle-marca" name="marca" label="Marca do Veículo" value={(currentVehicle as Vehicle).marca} onChange={handleVehicleChange} required />
-                <Input id="vehicle-model" name="model" label="Modelo" value={(currentVehicle as Vehicle).model} onChange={handleVehicleChange} required />
-                <div className="flex justify-end gap-2">
-                    {isEditingVehicle && <Button type="button" variant="secondary" onClick={handleCancelEditVehicle}>Cancelar Edição</Button>}
-                    <Button type="submit" disabled={isSubmittingVehicle}>
-                        {isSubmittingVehicle ? <div className="flex justify-center items-center h-5 w-36"><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-black"></div></div> : (isEditingVehicle ? 'Salvar Alterações' : 'Adicionar Veículo')}
-                    </Button>
-                </div>
-            </form>
+                </form>
+            )}
 
-            <div className="border-t border-border pt-4">
-                <h4 className="font-semibold mb-2">Veículos Cadastrados</h4>
-                <div className="space-y-3 max-h-64 overflow-y-auto pr-2">
-                    {vehiclesLoading ? <LoadingSpinner /> : (
-                    vehicles.length > 0 ? vehicles.map(vehicle => (
-                        <div key={vehicle.id} className="flex justify-between items-center p-2 bg-secondary rounded-md">
-                        <div className="flex items-center gap-3">
-                            <img src={vehicle.photoUrl} alt={vehicle.marca} className="w-12 h-12 rounded-md object-cover" />
-                            <div>
-                            <p className="font-semibold">{vehicle.marca}</p>
-                            <p className="text-sm text-text-secondary">{vehicle.model}</p>
+            {stockModalMode === 'view' && (
+                <div className="border-t border-border pt-4">
+                    <div className="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4">
+                        <Input
+                            id="vehicle-search"
+                            label=""
+                            placeholder="Buscar por marca ou modelo..."
+                            value={vehicleSearchTerm}
+                            onChange={(e) => setVehicleSearchTerm(e.target.value)}
+                            className="flex-grow w-full sm:w-auto mb-0"
+                        />
+                      <div className="flex gap-2 w-full sm:w-auto">
+                        <Button variant="secondary" onClick={handleOpenImportModal} className="flex-grow">Importar</Button>
+                        <Button onClick={() => { handleAddNewVehicle(); setStockModalMode('add'); }} className="flex-grow">Adicionar Novo</Button>
+                      </div>
+                    </div>
+                    <div className="space-y-3 max-h-64 overflow-y-auto pr-2">
+                        {vehiclesLoading ? <LoadingSpinner /> : (
+                        filteredVehicles.length > 0 ? filteredVehicles.map(vehicle => (
+                            <div key={vehicle.id} className="flex justify-between items-center p-2 bg-secondary rounded-md">
+                            <div className="flex items-center gap-3">
+                                <img src={vehicle.photoUrl} alt={vehicle.marca} className="w-12 h-12 rounded-md object-cover" />
+                                <div>
+                                <p className="font-semibold">{vehicle.marca}</p>
+                                <p className="text-sm text-text-secondary">{vehicle.model}</p>
+                                </div>
                             </div>
-                        </div>
-                        <div className="flex gap-2">
-                            <Button variant="secondary" className="py-1 px-2 text-xs" onClick={() => handleEditVehicle(vehicle)}>Editar</Button>
-                            <Button variant="danger" className="py-1 px-2 text-xs" onClick={() => handleDeleteVehicleClick(vehicle.id)}>Excluir</Button>
-                        </div>
-                        </div>
-                    )) : <p className="text-center text-text-secondary py-4">Nenhum veículo cadastrado.</p>
-                    )}
+                            <div className="flex gap-2">
+                                <Button variant="secondary" className="py-1 px-2 text-xs" onClick={() => handleEditVehicle(vehicle)}>Editar</Button>
+                                <Button variant="danger" className="py-1 px-2 text-xs" onClick={() => handleDeleteVehicleClick(vehicle.id)}>Excluir</Button>
+                            </div>
+                            </div>
+                        )) : <p className="text-center text-text-secondary py-4">Nenhum veículo encontrado.</p>
+                        )}
+                    </div>
                 </div>
-            </div>
+            )}
         </div>
       </Modal>
 
       {/* Import Modal */}
       <Modal isOpen={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} title="Importar Estoque via Planilha">
           <div className="space-y-4">
-              <p className="text-text-secondary">Envie um arquivo <code className="bg-background text-primary px-1 rounded">.csv</code> com as colunas: <code className="bg-background text-primary px-1 rounded">Marca</code> (obrigatório), <code className="bg-background text-primary px-1 rounded">Modelo</code> (obrigatório), <code className="bg-background text-primary px-1 rounded">Foto (URL)</code> (opcional) e <code className="bg-background text-primary px-1 rounded">Status</code> (opcional, padrão 'Disponível').</p>
+              <p className="text-text-secondary">Envie um arquivo <code className="bg-background text-primary px-1 rounded">.csv, .xls ou .xlsx</code> com as colunas: <code className="bg-background text-primary px-1 rounded">Marca</code> (obrigatório), <code className="bg-background text-primary px-1 rounded">Modelo</code> (obrigatório)</p>
               
-              <Button onClick={handleDownloadTemplate} variant="secondary" className="w-full">Baixar Planilha Modelo</Button>
+              <Button onClick={handleDownloadTemplate} variant="secondary" className="w-full">Baixar Planilha Modelo (.csv)</Button>
               
               <input 
                   type="file"
-                  accept=".csv"
+                  accept=".csv,.xls,.xlsx"
                   onChange={(e) => e.target.files && handleFileImport(e.target.files[0])}
                   className="w-full text-sm text-text-secondary file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-black hover:file:bg-primary-dark"
                   disabled={isImporting}
@@ -854,6 +1080,15 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
         message="Tem certeza que deseja excluir este veículo do estoque?"
         confirmText="Excluir"
       />
+       <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(-10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+          animation: fadeIn 0.3s ease-out forwards;
+        }
+    `}</style>
     </div>
   );
 };
