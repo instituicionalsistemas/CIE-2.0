@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Routes, Route, useParams, Navigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import AdminLayout from '../../components/Admin/AdminLayout';
 import DashboardView from '../../components/Admin/DashboardView';
 import ParticipantCompaniesManager from '../../components/Admin/ParticipantCompaniesManager';
@@ -20,6 +21,14 @@ import TelaoRequestsDashboard from '../../components/Admin/TelaoRequestsDashboar
 
 const EventDashboardPage: React.FC = () => {
   const { eventId } = useParams<{ eventId: string }>();
+  const { user, updateAuthUser } = useAuth();
+
+  useEffect(() => {
+    // Sync the current eventId with the AuthContext for global components like the Header
+    if (user && eventId && user.eventId !== eventId) {
+      updateAuthUser({ ...user, eventId });
+    }
+  }, [eventId, user, updateAuthUser]);
 
   if (!eventId) {
     return <Navigate to="/admin/events" replace />;

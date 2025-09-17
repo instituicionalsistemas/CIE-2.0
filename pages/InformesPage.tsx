@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
@@ -144,6 +145,7 @@ const InformesPage: React.FC = () => {
   const [stockSubmitting, setStockSubmitting] = useState<string | null>(null); // vehicle.id
   const [stockSubmitStatus, setStockSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [lastSubmittedVehicle, setLastSubmittedVehicle] = useState<{id: string, type: 'Venda' | 'Teste Drive'} | null>(null);
+  const [stockSearchTerm, setStockSearchTerm] = useState('');
 
   // State for Company Calls
   const [pendingCompanyCalls, setPendingCompanyCalls] = useState<CompanyCall[]>([]);
@@ -903,6 +905,7 @@ const InformesPage: React.FC = () => {
         setStockView('menu');
         setStockSubmitStatus('idle');
         setLastSubmittedVehicle(null);
+        setStockSearchTerm('');
         setVehiclesLoading(true);
         try {
             const [allCompanyVehicles, movements] = await Promise.all([
@@ -963,6 +966,15 @@ const InformesPage: React.FC = () => {
             v.placa && v.placa.includes(vehicleSearchTerm)
         );
     }, [vehicles, vehicleSearchTerm]);
+
+    const filteredStockVehicles = useMemo(() => {
+        if (!stockSearchTerm) {
+            return vehicles;
+        }
+        return vehicles.filter(v =>
+            v.placa && v.placa.toUpperCase().includes(stockSearchTerm)
+        );
+    }, [vehicles, stockSearchTerm]);
 
   const handleOpenCallsModal = () => setIsCallsModalOpen(true);
   const handleCloseCallsModal = () => setIsCallsModalOpen(false);
@@ -1568,7 +1580,7 @@ const InformesPage: React.FC = () => {
             {stockView === 'menu' && (
                 <div className="flex flex-col gap-4 p-4">
                     <Button onClick={() => setStockView('venda')} className="w-full text-lg py-4">Venda</Button>
-                    <Button onClick={() => setStockView('teste_drive')} className="w-full text-lg py-4">Teste Drive</Button>
+                    <Button onClick={() => setStockView('teste_drive')} className="w-full text-lg py-4">Test Drive</Button>
                 </div>
             )}
 
@@ -1579,26 +1591,36 @@ const InformesPage: React.FC = () => {
                             &larr; Voltar
                         </Button>
                         <h3 className="text-xl font-semibold text-primary">
-                            {stockView === 'venda' ? 'Confirmar Venda' : 'Confirmar Teste Drive'}
+                            {stockView === 'venda' ? 'Confirmar Venda' : 'Confirmar Test Drive'}
                         </h3>
                     </div>
 
+                    <Input
+                        id="stock-search"
+                        label=""
+                        placeholder="Buscar por Placa..."
+                        value={stockSearchTerm}
+                        onChange={(e) => setStockSearchTerm(e.target.value.toUpperCase())}
+                        className="mb-4"
+                    />
+
                     {vehiclesLoading ? <LoadingSpinner /> : (
                         <div className="space-y-3">
-                            {vehicles.length > 0 ? vehicles.map(vehicle => (
+                            {filteredStockVehicles.length > 0 ? filteredStockVehicles.map(vehicle => (
                                 <div key={vehicle.id} className="p-3 bg-secondary rounded-lg flex flex-col sm:flex-row justify-between items-center gap-3">
                                     <div className="flex items-center gap-4">
                                         <img src={vehicle.photoUrl} alt={vehicle.marca} className="w-16 h-16 rounded-lg object-cover" />
                                         <div>
                                             <p className="font-bold text-text">{vehicle.marca}</p>
                                             <p className="text-sm text-text-secondary">{vehicle.model}</p>
+                                            <p className="text-sm text-text-secondary">Placa: {vehicle.placa || 'N/D'}</p>
                                         </div>
                                     </div>
                                     
                                     {lastSubmittedVehicle?.id === vehicle.id ? (
                                         <div className="text-green-400 font-bold flex items-center gap-2">
                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                            {lastSubmittedVehicle.type} Registrada!
+                                            {lastSubmittedVehicle.type === 'Teste Drive' ? 'Test Drive' : lastSubmittedVehicle.type} Registrada!
                                         </div>
                                     ) : (
                                         <Button
@@ -1608,13 +1630,13 @@ const InformesPage: React.FC = () => {
                                         >
                                             {stockSubmitting === vehicle.id 
                                                 ? <div className="flex justify-center items-center h-5 w-40"><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-black"></div></div>
-                                                : `Confirmar ${stockView === 'venda' ? 'Venda' : 'Teste Drive'}`
+                                                : `Confirmar ${stockView === 'venda' ? 'Venda' : 'Test Drive'}`
                                             }
                                         </Button>
                                     )}
                                 </div>
                             )) : (
-                                <p className="text-center text-text-secondary py-8">Nenhum veículo no estoque desta empresa.</p>
+                                <p className="text-center text-text-secondary py-8">{stockSearchTerm ? 'Nenhum veículo encontrado para a placa informada.' : 'Nenhum veículo no estoque desta empresa.'}</p>
                             )}
                         </div>
                     )}

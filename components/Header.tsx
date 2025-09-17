@@ -5,8 +5,8 @@ import { triad3Logo } from '../assets/logo';
 import Modal from './Modal';
 import Button from './Button';
 import LoadingSpinner from './LoadingSpinner';
-import { uploadImage, updateUserPhoto, updateCollaborator, getCompanyCallsByEvent } from '../services/api';
-import { UserRole, Collaborator, CallStatus } from '../types';
+import { uploadImage, updateUserPhoto, updateCollaborator, getCompanyCallsByEvent, getTelaoRequestsByEvent } from '../services/api';
+import { UserRole, Collaborator, CallStatus, TelaoRequestStatus } from '../types';
 
 const Header: React.FC = () => {
   const { isAuthenticated, user, logout, updateAuthUser } = useAuth();
@@ -31,31 +31,35 @@ const Header: React.FC = () => {
   const [isCollabUpdating, setIsCollabUpdating] = useState(false);
   const [collabUpdateError, setCollabUpdateError] = useState<string | null>(null);
 
-  const [pendingCallsCount, setPendingCallsCount] = useState(0);
+  const [pendingNotificationsCount, setPendingNotificationsCount] = useState(0);
 
   useEffect(() => {
     if (!user || (user.role !== UserRole.ADMIN && user.role !== UserRole.ORGANIZER) || !user.eventId) {
-        setPendingCallsCount(0);
+        setPendingNotificationsCount(0);
         return;
     }
 
     const eventId = user.eventId;
     let isMounted = true;
 
-    const fetchPendingCalls = async () => {
+    const fetchPendingNotifications = async () => {
         try {
-            const calls = await getCompanyCallsByEvent(eventId);
+            const [calls, telaoRequests] = await Promise.all([
+                getCompanyCallsByEvent(eventId),
+                getTelaoRequestsByEvent(eventId),
+            ]);
             if (isMounted) {
-                const pending = calls.filter(c => c.status === CallStatus.PENDENTE).length;
-                setPendingCallsCount(pending);
+                const pendingCalls = calls.filter(c => c.status === CallStatus.PENDENTE).length;
+                const pendingTelao = telaoRequests.filter(r => r.status === TelaoRequestStatus.PENDENTE).length;
+                setPendingNotificationsCount(pendingCalls + pendingTelao);
             }
         } catch (e) {
-            console.error("Failed to fetch pending calls for header", e);
+            console.error("Failed to fetch pending notifications for header", e);
         }
     };
 
-    fetchPendingCalls();
-    const intervalId = setInterval(fetchPendingCalls, 30000); // Poll every 30 seconds
+    fetchPendingNotifications();
+    const intervalId = setInterval(fetchPendingNotifications, 30000); // Poll every 30 seconds
 
     return () => {
         isMounted = false;
@@ -209,9 +213,9 @@ const Header: React.FC = () => {
             <>
               <Link to={`/admin/event/${user.eventId}/company-calls-dashboard`} className="relative p-2 rounded-full hover:bg-secondary-hover transition-colors" aria-label="Notificações de chamados">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                  {pendingCallsCount > 0 && (
+                  {pendingNotificationsCount > 0 && (
                       <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-md">
-                          {pendingCallsCount}
+                          {pendingNotificationsCount}
                       </span>
                   )}
               </Link>
