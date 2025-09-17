@@ -1,4 +1,3 @@
-
 import React, { createContext, useState, useEffect, ReactNode, useContext, useCallback } from 'react';
 import { User, UserRole, Event } from '../types';
 import { apiLogin, apiLogout } from '../services/api';
@@ -22,12 +21,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const navigate = useNavigate();
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
+    try {
+        const storedUserRaw = localStorage.getItem('user');
+        if (storedUserRaw) {
+            setUser(JSON.parse(storedUserRaw));
+        }
+    } catch (error) {
+        console.error("Failed to parse user from localStorage", error);
+        localStorage.removeItem('user');
+    } finally {
+        setLoading(false);
     }
-    setLoading(false);
   }, []);
+
 
   const login = useCallback(async (email: string, pass: string) => {
     setLoading(true);
@@ -44,11 +50,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } else if (loggedInUser.events && loggedInUser.events.length === 1) {
           navigate(`/admin/event/${loggedInUser.events[0].id}/dashboard`);
         } else {
-          // This case is handled by an error thrown from apiLogin, but as a fallback:
           navigate('/'); 
         }
       } else {
-        // Fallback for other roles or conditions
         navigate('/');
       }
     } catch (error) {
@@ -58,11 +62,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [navigate]);
 
-  const logout = useCallback(() => {
-    apiLogout();
+  const logout = useCallback(async () => {
+    await apiLogout();
     setUser(null);
     localStorage.removeItem('user');
     sessionStorage.removeItem('checkinInfo');
+    sessionStorage.removeItem('collaboratorCheckinInfo');
     navigate('/login');
   }, [navigate]);
 
@@ -79,7 +84,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         const newEvent = currentUser.events?.find(e => e.id === eventId);
         if (!newEvent) {
-            return currentUser; // Event not found in user's list, do nothing.
+            return currentUser;
         }
 
         const updatedUser = { ...currentUser, eventId: eventId };

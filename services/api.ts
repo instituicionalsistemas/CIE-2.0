@@ -81,76 +81,81 @@ const camelCaseKeys = (obj: any): any => {
 };
 
 // --- Auth ---
-// NOTE: This implements a custom auth flow matching the mock database's logic.
-// For production, it's highly recommended to use Supabase Auth (`supabase.auth.signInWithPassword`, etc.)
-// and hash passwords securely.
 export const apiLogin = async (email: string, pass: string): Promise<User> => {
-  // Find one user to validate credentials
-  const { data: authUser, error: authError } = await supabase
-    .from('users')
-    .select('*')
-    .eq('email', email)
-    .eq('password', pass) // WARNING: Storing and comparing plaintext passwords is insecure.
-    .limit(1)
-    .single();
-
-  if (authError || !authUser) {
-    throw new Error('Credenciais inválidas.');
-  }
-
-  const user = camelCaseKeys(authUser) as User;
-
-  if (user.role === UserRole.ORGANIZER && user.eventId) {
-      // New logic: Find the organizer company via the user's initial event
-      const { data: organizerEvent, error: organizerEventError } = await supabase
-        .from('events')
-        .select('organizer_company_id')
-        .eq('id', user.eventId)
-        .single();
-      
-      if (organizerEventError || !organizerEvent) {
-          throw new Error('Não foi possível encontrar a empresa organizadora associada a este usuário.');
-      }
-
-      const organizerCompanyId = organizerEvent.organizer_company_id;
-      
-      // Fetch all active events for that organizer company
-      const { data: eventsData, error: eventsError } = await supabase
-        .from('events')
-        .select('*')
-        .eq('organizer_company_id', organizerCompanyId)
-        .eq('is_active', true);
-
-      if (eventsError) {
-          throw new Error('Falha ao carregar os dados dos eventos.');
-      }
-      
-      user.events = camelCaseKeys(eventsData) as Event[];
-      
-      if (user.events.length === 0) {
-           throw new Error('Você não tem eventos ativos associados.');
-      }
-
-      // Ensure the user's current eventId is one of the active ones. Default to the first if not.
-      if (!user.events.some(e => e.id === user.eventId)) {
-          user.eventId = user.events[0].id;
-      }
-  } else if (user.eventId) { // For non-organizer roles with an eventId
-    const { data: event, error: eventError } = await supabase
-      .from('events')
-      .select('is_active')
-      .eq('id', user.eventId)
+    // 1. Fetch user by email
+    const { data: userProfile, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
       .single();
-    
-    if (eventError || (event && !event.is_active)) {
-      throw new Error('O evento associado a esta conta está inativo.');
-    }
-  }
 
-  return user;
+    if (userError || !userProfile) {
+      throw new Error('Credenciais inválidas.');
+    }
+
+    // 2. Unsafe password check (reverted to original logic)
+    // NOTE: Storing and comparing plaintext passwords is a major security risk.
+    if (userProfile.password !== pass) {
+      throw new Error('Credenciais inválidas.');
+    }
+
+    // Omit password from returned data
+    const { password, ...userWithoutPassword } = userProfile;
+    const user = camelCaseKeys(userWithoutPassword) as User;
+
+    // 3. Enrich user object with event data
+    if (user.role === UserRole.ORGANIZER && user.eventId) {
+        const { data: organizerEvent, error: organizerEventError } = await supabase
+            .from('events')
+            .select('organizer_company_id')
+            .eq('id', user.eventId)
+            .single();
+        
+        if (organizerEventError || !organizerEvent) {
+            throw new Error('Não foi possível encontrar a empresa organizadora associada a este usuário.');
+        }
+
+        const organizerCompanyId = organizerEvent.organizer_company_id;
+        
+        const { data: eventsData, error: eventsError } = await supabase
+            .from('events')
+            .select('*')
+            .eq('organizer_company_id', organizerCompanyId)
+            .eq('is_active', true);
+
+        if (eventsError) {
+            throw new Error('Falha ao carregar os dados dos eventos.');
+        }
+        
+        user.events = camelCaseKeys(eventsData) as Event[];
+        
+        if (user.events.length === 0) {
+            throw new Error('Você não tem eventos ativos associados.');
+        }
+
+        if (!user.events.some(e => e.id === user.eventId)) {
+            user.eventId = user.events[0].id;
+        }
+    } else if (user.eventId) { // For non-organizer roles with an eventId
+        const { data: event, error: eventError } = await supabase
+            .from('events')
+            .select('is_active')
+            .eq('id', user.eventId)
+            .single();
+        
+        if (eventError || (event && !event.is_active)) {
+            throw new Error('O evento associado a esta conta está inativo.');
+        }
+    }
+
+    return user;
 };
 
-export const apiLogout = () => { /* No-op, handled by AuthContext */ };
+export const apiLogout = async () => {
+    // Reverted to original simple logout
+    return Promise.resolve();
+};
+
 
 // --- Checkin ---
 export const validateCheckin = async (boothCode: string, personalCode: string) => {
@@ -163,6 +168,9 @@ export const validateCheckin = async (boothCode: string, personalCode: string) =
   if (companyError || !company) throw new Error('Código do Estande inválido.');
   
   const participantCompany = camelCaseKeys(company) as ParticipantCompany;
+  const event = camelCaseKeys(company.event) as Event;
+  if (!event) throw new Error('Evento associado não encontrado.');
+  if (!event.isActive) throw new Error('Este evento está inativo no momento.');
 
   const { data: staff, error: staffError } = await supabase
     .from('staff')
@@ -171,17 +179,28 @@ export const validateCheckin = async (boothCode: string, personalCode: string) =
     .single();
 
   if (staffError || !staff) throw new Error('Código Pessoal inválido.');
-  
-  const event = camelCaseKeys(company.event) as Event;
-  if (!event) throw new Error('Evento associado não encontrado.');
-  if (!event.isActive) throw new Error('Este evento está inativo no momento.');
 
-  if (event.organizerCompanyId !== staff.organizer_company_id) {
-    throw new Error('Equipe e Empresa não pertencem ao mesmo evento.');
+  // NEW LOGIC: Verify the staff is assigned to this event
+  const { data: assignment, error: assignmentError } = await supabase
+    .from('staff_event_assignments')
+    .select('department_id')
+    .eq('staff_id', staff.id)
+    .eq('event_id', event.id)
+    .single();
+
+  if (assignmentError || !assignment) {
+    throw new Error('Este membro da equipe não está atribuído a este evento.');
   }
+  
+  if (event.organizerCompanyId !== staff.organizer_company_id) {
+    throw new Error('Equipe e Empresa não pertencem à mesma organização.');
+  }
+  
+  const staffWithDepartment = { ...camelCaseKeys(staff), departmentId: assignment.department_id };
 
-  return { staff: camelCaseKeys(staff) as Staff, event, company: participantCompany };
+  return { staff: staffWithDepartment as Staff, event, company: participantCompany };
 };
+
 
 export const validateCollaboratorCheckin = async (boothCode: string, collaboratorCode: string) => {
   const { data: company, error: companyError } = await supabase
@@ -661,30 +680,136 @@ export const getStaffByOrganizer = async (organizerId: string): Promise<Staff[]>
     if (error) throw new Error(error.message);
     return camelCaseKeys(data) as Staff[];
 };
+
 export const getStaffByEvent = async (eventId: string): Promise<Staff[]> => {
-    // 1. Get departments for the current event
-    const { data: departments, error: deptsError } = await supabase.from('departments').select('id').eq('event_id', eventId);
-    if (deptsError) {
-        console.error("Failed to get departments for staff filtering", deptsError);
+    // 1. Get all assignments for the given event
+    const { data: assignments, error: assignmentsError } = await supabase
+        .from('staff_event_assignments')
+        .select('staff_id, department_id')
+        .eq('event_id', eventId);
+
+    if (assignmentsError) {
+        console.error("Failed to get staff assignments for event:", assignmentsError);
         return [];
     }
-    const departmentIds = departments.map(d => d.id);
-    if (departmentIds.length === 0) {
-        return []; // No departments means no staff can be linked to this event
+
+    if (assignments.length === 0) {
+        return [];
     }
 
-    // 2. Get the organizer company ID from the event
-    const { data: event } = await supabase.from('events').select('organizer_company_id').eq('id', eventId).single();
-    if (!event) return [];
-    
-    // 3. Get all staff for that company
-    const allCompanyStaff = await getStaffByOrganizer(event.organizer_company_id);
+    const staffIds = assignments.map(a => a.staff_id);
+    const departmentMap = new Map(assignments.map(a => [a.staff_id, a.department_id]));
 
-    // 4. Filter staff to only include those whose departmentId is in the event's department list
-    return allCompanyStaff.filter(staff => staff.departmentId && departmentIds.includes(staff.departmentId));
-}
-export const addStaff = staffApi.add;
-export const updateStaff = staffApi.update;
+    // 2. Get all staff details for the retrieved IDs
+    const { data: staffData, error: staffError } = await supabase
+        .from('staff')
+        .select('*')
+        .in('id', staffIds);
+
+    if (staffError) {
+        console.error("Failed to fetch staff details for event:", staffError);
+        return [];
+    }
+
+    // 3. Combine staff data with their department for this specific event
+    const eventStaff = staffData.map(staffMember => ({
+        ...camelCaseKeys(staffMember),
+        departmentId: departmentMap.get(staffMember.id),
+    }));
+
+    return eventStaff as Staff[];
+};
+
+export const addStaffAndAssignToEvent = async (staffData: Omit<Staff, 'id'>, eventId: string): Promise<Staff> => {
+    const { departmentId, ...restOfStaffData } = staffData;
+
+    // 1. Create the staff member in the main 'staff' table
+    const { data: newStaff, error: staffError } = await supabase
+        .from('staff')
+        .insert(snakeCaseKeys(restOfStaffData))
+        .select()
+        .single();
+
+    if (staffError) {
+        console.error("Error creating staff member:", staffError);
+        throw new Error("Falha ao criar o membro da equipe.");
+    }
+
+    // 2. Create the assignment in the linking table
+    const assignment = {
+        staff_id: newStaff.id,
+        event_id: eventId,
+        department_id: departmentId,
+    };
+
+    const { error: assignmentError } = await supabase
+        .from('staff_event_assignments')
+        .insert(assignment);
+
+    if (assignmentError) {
+        // In a real app, we might want to roll back the staff creation here (transaction)
+        console.error("Error assigning staff to event:", assignmentError);
+        throw new Error("Falha ao vincular o membro da equipe ao evento.");
+    }
+
+    return camelCaseKeys({ ...newStaff, departmentId }) as Staff;
+};
+
+export const updateStaffAndAssignment = async (staffData: Staff, eventId: string): Promise<Staff> => {
+    const { departmentId, id, ...restOfStaffData } = staffData;
+
+    // 1. Update the core staff details
+    const { data: updatedStaff, error: staffError } = await supabase
+        .from('staff')
+        .update(snakeCaseKeys(restOfStaffData))
+        .eq('id', id)
+        .select()
+        .single();
+
+    if (staffError) {
+        console.error("Error updating staff member:", staffError);
+        throw new Error("Falha ao atualizar os dados do membro da equipe.");
+    }
+
+    // 2. Update the assignment for this specific event
+    if (departmentId) {
+        const { error: assignmentError } = await supabase
+            .from('staff_event_assignments')
+            .update({ department_id: departmentId })
+            .eq('staff_id', id)
+            .eq('event_id', eventId);
+
+        if (assignmentError) {
+            console.error("Error updating staff assignment:", assignmentError);
+            throw new Error("Falha ao atualizar o departamento do membro da equipe para este evento.");
+        }
+    }
+
+    return camelCaseKeys({ ...updatedStaff, departmentId }) as Staff;
+};
+
+export const assignStaffToEvent = async (staffId: string, eventId: string, departmentId: string): Promise<void> => {
+    const assignment = {
+        staff_id: staffId,
+        event_id: eventId,
+        department_id: departmentId,
+    };
+
+    const { error } = await supabase
+        .from('staff_event_assignments')
+        .insert(assignment);
+
+    if (error) {
+        // Handle unique constraint violation gracefully
+        if (error.code === '23505') { // unique_violation
+            console.warn(`Staff member ${staffId} is already assigned to event ${eventId}.`);
+            throw new Error("Este membro já está vinculado a este evento.");
+        }
+        console.error("Error assigning staff to event:", error);
+        throw new Error("Falha ao vincular o membro da equipe ao evento.");
+    }
+};
+
 export const deleteStaff = staffApi.delete;
 export const getStaffActivity = async (staffId: string): Promise<StaffActivity[]> => {
   const { data, error } = await supabase

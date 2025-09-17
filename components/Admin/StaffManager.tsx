@@ -1,5 +1,16 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { getStaffByEvent, addStaff, updateStaff, deleteStaff, getEvents, getOrganizerCompanyById, getDepartmentsByEvent, uploadImage, getStaffByOrganizer } from '../../services/api';
+import { 
+    getStaffByEvent, 
+    addStaffAndAssignToEvent, 
+    updateStaffAndAssignment, 
+    deleteStaff, 
+    getEvents, 
+    getOrganizerCompanyById, 
+    getDepartmentsByEvent, 
+    uploadImage, 
+    getStaffByOrganizer,
+    assignStaffToEvent
+} from '../../services/api';
 import { Staff, Event, OrganizerCompany, Department } from '../../types';
 import Modal from '../Modal';
 import Input from '../Input';
@@ -139,9 +150,9 @@ const StaffManager: React.FC<Props> = ({ eventId }) => {
         }
 
         if (isEditing) {
-          await updateStaff(staffData as Staff);
+          await updateStaffAndAssignment(staffData as Staff, eventId);
         } else {
-          await addStaff(staffData as Omit<Staff, 'id'>);
+          await addStaffAndAssignToEvent(staffData as Omit<Staff, 'id'>, eventId);
         }
         fetchData();
         handleCloseModal();
@@ -177,14 +188,10 @@ const StaffManager: React.FC<Props> = ({ eventId }) => {
     }
     setIsLinking(true);
     try {
-        const updatePromises = selectedStaffToLink.map(staffId => {
-            const staffMember = allOrganizerStaff.find(s => s.id === staffId);
-            if (staffMember) {
-                return updateStaff({ ...staffMember, departmentId: linkTargetDepartment });
-            }
-            return Promise.resolve();
+        const linkPromises = selectedStaffToLink.map(staffId => {
+            return assignStaffToEvent(staffId, eventId, linkTargetDepartment);
         });
-        await Promise.all(updatePromises);
+        await Promise.all(linkPromises);
         fetchData();
         handleCloseModal();
     } catch (error) {
