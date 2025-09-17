@@ -3,6 +3,15 @@ import { useParams } from 'react-router-dom';
 import { getCompanyCallsByEvent } from '../../services/api';
 import { CompanyCall, CallStatus } from '../../types';
 import LoadingSpinner from '../LoadingSpinner';
+import Button from '../Button';
+
+declare const jspdf: any;
+
+const DownloadIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+    </svg>
+);
 
 const StatusBadge: React.FC<{ status: CallStatus }> = ({ status }) => {
   const baseClasses = 'px-2 py-1 text-xs font-bold rounded-full';
@@ -51,16 +60,66 @@ const CompanyCallsDashboard: React.FC = () => {
       }`;
   };
 
+  const handleDownloadPdf = () => {
+    const doc = new jspdf.jsPDF();
+    const filterText = filter === 'all' ? 'Todos' : filter;
+
+    doc.setFontSize(18);
+    doc.text(`Relatório de Chamados (${filterText})`, 14, 22);
+    doc.setFontSize(11);
+    doc.setTextColor(100);
+    doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, 14, 30);
+
+    const tableColumn = ["Empresa", "Solicitante", "Departamento", "Observação", "Status", "Data", "Resolvido por", "Feedback"];
+    const tableRows: string[][] = [];
+
+    filteredCalls.forEach(call => {
+        const callData = [
+            call.company?.name || 'N/A',
+            call.collaboratorName,
+            call.department?.name || 'N/A',
+            call.observation || '',
+            call.status,
+            new Date(call.createdAt).toLocaleString('pt-BR'),
+            call.staff?.name || (call.status === CallStatus.CONCLUIDO ? 'N/A' : ''),
+            call.resolverFeedback || (call.status === CallStatus.CONCLUIDO ? '' : ''),
+        ];
+        tableRows.push(callData);
+    });
+
+    doc.autoTable({
+        head: [tableColumn],
+        body: tableRows,
+        startY: 35,
+        theme: 'grid',
+        headStyles: { fillColor: [18, 181, 229] },
+    });
+    
+    const safeFilterName = filter.toLowerCase();
+    doc.save(`relatorio_chamados_${safeFilterName}.pdf`);
+  };
+
   if (loading && calls.length === 0) return <LoadingSpinner />;
 
   return (
     <div className="bg-card p-6 rounded-lg shadow-md">
       <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
         <h2 className="text-3xl font-bold">Painel de Chamados das Empresas</h2>
-        <div className="flex items-center gap-2 p-1 bg-background rounded-lg">
-            <button onClick={() => setFilter('all')} className={getFilterButtonClass('all')}>Todos</button>
-            <button onClick={() => setFilter(CallStatus.PENDENTE)} className={getFilterButtonClass(CallStatus.PENDENTE)}>Pendentes</button>
-            <button onClick={() => setFilter(CallStatus.CONCLUIDO)} className={getFilterButtonClass(CallStatus.CONCLUIDO)}>Concluídos</button>
+        <div className="flex flex-col sm:flex-row items-center gap-4">
+            <div className="flex items-center gap-2 p-1 bg-background rounded-lg">
+                <button onClick={() => setFilter('all')} className={getFilterButtonClass('all')}>Todos</button>
+                <button onClick={() => setFilter(CallStatus.PENDENTE)} className={getFilterButtonClass(CallStatus.PENDENTE)}>Pendentes</button>
+                <button onClick={() => setFilter(CallStatus.CONCLUIDO)} className={getFilterButtonClass(CallStatus.CONCLUIDO)}>Concluídos</button>
+            </div>
+            <Button
+                onClick={handleDownloadPdf}
+                variant="secondary"
+                disabled={filteredCalls.length === 0}
+                className="text-sm py-2 px-3 flex items-center"
+            >
+                <DownloadIcon />
+                Download
+            </Button>
         </div>
       </div>
 
