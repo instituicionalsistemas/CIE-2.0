@@ -3,7 +3,8 @@ import {
     getStaffByEvent, 
     addStaffAndAssignToEvent, 
     updateStaffAndAssignment, 
-    deleteStaff, 
+    unassignStaffFromEvent,
+    deleteStaff,
     getEvents, 
     getOrganizerCompanyById, 
     getDepartmentsByEvent, 
@@ -35,7 +36,9 @@ const StaffManager: React.FC<Props> = ({ eventId }) => {
   
   const [isMainModalOpen, setIsMainModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'CHOICE' | 'CREATE' | 'LINK_EXISTING'>('CHOICE');
-  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [isConfirmUnlinkModalOpen, setIsConfirmUnlinkModalOpen] = useState(false);
+  const [isConfirmDeleteModalOpen, setIsConfirmDeleteModalOpen] = useState(false);
+  const [itemToUnlink, setItemToUnlink] = useState<string | null>(null);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
 
   const [currentStaff, setCurrentStaff] = useState<Omit<Staff, 'id'> | Staff>(emptyStaff);
@@ -161,17 +164,41 @@ const StaffManager: React.FC<Props> = ({ eventId }) => {
     }
   };
   
+  const handleUnlinkClick = (id: string) => {
+    setItemToUnlink(id);
+    setIsConfirmUnlinkModalOpen(true);
+  };
+
+  const handleConfirmUnlink = async () => {
+    if (itemToUnlink) {
+      try {
+        await unassignStaffFromEvent(itemToUnlink, eventId);
+        fetchData();
+      } catch (error) {
+        console.error("Failed to unlink staff:", error);
+      } finally {
+        setItemToUnlink(null);
+        setIsConfirmUnlinkModalOpen(false);
+      }
+    }
+  };
+
   const handleDeleteClick = (id: string) => {
     setItemToDelete(id);
-    setIsConfirmModalOpen(true);
+    setIsConfirmDeleteModalOpen(true);
   };
 
   const handleConfirmDelete = async () => {
     if (itemToDelete) {
-      await deleteStaff(itemToDelete);
-      fetchData();
-      setItemToDelete(null);
-      setIsConfirmModalOpen(false);
+      try {
+        await deleteStaff(itemToDelete);
+        fetchData();
+      } catch (error) {
+        console.error("Failed to delete staff:", error);
+      } finally {
+        setItemToDelete(null);
+        setIsConfirmDeleteModalOpen(false);
+      }
     }
   };
 
@@ -339,8 +366,9 @@ const StaffManager: React.FC<Props> = ({ eventId }) => {
                         <p className="text-sm text-text-secondary">Tel: {member.phone || 'N/D'}</p>
                     </div>
                 </div>
-                <div className="flex gap-2 mt-4 pt-4 border-t border-border flex-shrink-0">
+                <div className="grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-border flex-shrink-0">
                     <Button variant="secondary" onClick={() => handleOpenEditModal(member)} className="text-sm w-full">Editar</Button>
+                    <Button variant="secondary" onClick={() => handleUnlinkClick(member.id)} className="text-sm w-full">Desvincular</Button>
                     <Button variant="danger" onClick={() => handleDeleteClick(member.id)} className="text-sm w-full">Excluir</Button>
                 </div>
             </div>
@@ -359,12 +387,21 @@ const StaffManager: React.FC<Props> = ({ eventId }) => {
       </Modal>
       
       <ConfirmationModal
-        isOpen={isConfirmModalOpen}
-        onClose={() => setIsConfirmModalOpen(false)}
+        isOpen={isConfirmUnlinkModalOpen}
+        onClose={() => setIsConfirmUnlinkModalOpen(false)}
+        onConfirm={handleConfirmUnlink}
+        title="Confirmar Desvinculação"
+        message="Tem certeza que deseja desvincular este membro deste evento? Ele ainda permanecerá na lista de membros da equipe da sua organização e poderá ser vinculado novamente."
+        confirmText="Desvincular"
+      />
+
+      <ConfirmationModal
+        isOpen={isConfirmDeleteModalOpen}
+        onClose={() => setIsConfirmDeleteModalOpen(false)}
         onConfirm={handleConfirmDelete}
-        title="Confirmar Exclusão"
-        message="Tem certeza que deseja excluir este membro da equipe? Esta ação não pode ser desfeita."
-        confirmText="Excluir"
+        title="Confirmar Exclusão Permanente"
+        message="Tem certeza que deseja excluir este membro da equipe PERMANENTEMENTE? Esta ação removerá o membro de TODOS os eventos e da sua organização. Esta ação não pode ser desfeita."
+        confirmText="Excluir Permanentemente"
       />
     </div>
   );

@@ -80,7 +80,7 @@ const StockReportView: React.FC<Props> = ({ eventId }) => {
         const dateText = dateFilter ? ` em ${new Date(dateFilter + 'T00:00:00').toLocaleDateString('pt-BR')}` : '';
 
         doc.setFontSize(18);
-        doc.text(`Relatório de Estoque (${filter})`, 14, 22);
+        doc.text(`Movimentação de Estoque (${filter})`, 14, 22);
         doc.setFontSize(11);
         doc.setTextColor(100);
         doc.text(`Empresa: ${selectedCompanyName}${dateText}`, 14, 30);
@@ -92,7 +92,7 @@ const StockReportView: React.FC<Props> = ({ eventId }) => {
         filteredMovements.forEach(m => {
             const rowData = [
                 m.type,
-                `${m.vehicle?.marca || 'N/D'} - ${m.vehicle?.model || 'N/D'}`,
+                `${m.vehicle?.marca || 'N/D'} - ${m.vehicle?.model || 'N/D'} (${m.vehicle?.placa || 'N/D'})`,
                 m.company?.name || 'N/D',
                 m.staff?.name || 'N/D',
                 new Date(m.timestamp).toLocaleString('pt-BR'),
@@ -109,7 +109,7 @@ const StockReportView: React.FC<Props> = ({ eventId }) => {
         });
 
         const safeFilterName = filter.toLowerCase().replace(/\s/g, '_');
-        doc.save(`relatorio_estoque_${safeFilterName}.pdf`);
+        doc.save(`movimentacao_estoque_${safeFilterName}.pdf`);
     };
 
     if (loading) return <LoadingSpinner />;
@@ -117,7 +117,7 @@ const StockReportView: React.FC<Props> = ({ eventId }) => {
     return (
         <div className="bg-card p-6 rounded-lg shadow-md">
             <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
-                <h2 className="text-3xl font-bold">Relatório de Estoque</h2>
+                <h2 className="text-3xl font-bold">Movimentação de Estoque</h2>
                 <div className="flex flex-col sm:flex-row items-center gap-4">
                      <input
                         type="date"
@@ -173,7 +173,11 @@ const StockReportView: React.FC<Props> = ({ eventId }) => {
                                             alt={`${m.vehicle?.marca || ''} ${m.vehicle?.model || ''}`}
                                             className="w-16 h-12 object-cover rounded-md bg-secondary flex-shrink-0"
                                         />
-                                        <span>{`${m.vehicle?.marca || 'N/D'} - ${m.vehicle?.model || 'N/D'}`}</span>
+                                        <div>
+                                          <span>{`${m.vehicle?.marca || 'N/D'} - ${m.vehicle?.model || 'N/D'}`}</span>
+                                          <p className="text-xs font-normal text-text-secondary">{m.vehicle?.placa || 'Sem placa'}</p>
+                                        </div>
+
                                     </div>
                                 </td>
                                 <td className="p-3">{m.company?.name || 'N/D'}</td>

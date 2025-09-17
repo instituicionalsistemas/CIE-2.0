@@ -5,8 +5,8 @@ import { triad3Logo } from '../assets/logo';
 import Modal from './Modal';
 import Button from './Button';
 import LoadingSpinner from './LoadingSpinner';
-import { uploadImage, updateUserPhoto, updateCollaborator } from '../services/api';
-import { UserRole, Collaborator } from '../types';
+import { uploadImage, updateUserPhoto, updateCollaborator, getCompanyCallsByEvent } from '../services/api';
+import { UserRole, Collaborator, CallStatus } from '../types';
 
 const Header: React.FC = () => {
   const { isAuthenticated, user, logout, updateAuthUser } = useAuth();
@@ -30,6 +30,39 @@ const Header: React.FC = () => {
   const [collabNewPhotoPreview, setCollabNewPhotoPreview] = useState<string | null>(null);
   const [isCollabUpdating, setIsCollabUpdating] = useState(false);
   const [collabUpdateError, setCollabUpdateError] = useState<string | null>(null);
+
+  const [pendingCallsCount, setPendingCallsCount] = useState(0);
+
+  useEffect(() => {
+    if (!user || (user.role !== UserRole.ADMIN && user.role !== UserRole.ORGANIZER) || !user.eventId) {
+        setPendingCallsCount(0);
+        return;
+    }
+
+    const eventId = user.eventId;
+    let isMounted = true;
+
+    const fetchPendingCalls = async () => {
+        try {
+            const calls = await getCompanyCallsByEvent(eventId);
+            if (isMounted) {
+                const pending = calls.filter(c => c.status === CallStatus.PENDENTE).length;
+                setPendingCallsCount(pending);
+            }
+        } catch (e) {
+            console.error("Failed to fetch pending calls for header", e);
+        }
+    };
+
+    fetchPendingCalls();
+    const intervalId = setInterval(fetchPendingCalls, 30000); // Poll every 30 seconds
+
+    return () => {
+        isMounted = false;
+        clearInterval(intervalId);
+    };
+
+  }, [user]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -173,29 +206,39 @@ const Header: React.FC = () => {
         </div>
         <div className="flex items-center gap-2 sm:gap-4">
           {isAuthenticated && user ? (
-            <div className="relative" ref={userMenuRef}>
-              <button onClick={() => setIsUserMenuOpen(prev => !prev)} className="flex items-center gap-2 rounded-full p-1 hover:bg-secondary-hover transition-colors">
-                <img src={user.photoUrl || 'https://via.placeholder.com/150'} alt={user.name} className="w-8 h-8 sm:w-10 sm:h-10 rounded-full object-cover border-2 border-primary" />
-                <span className="hidden sm:inline font-semibold text-sm">{user.name}</span>
-              </button>
-              {isUserMenuOpen && (
-                <div className="absolute right-0 mt-2 w-48 bg-card rounded-md shadow-lg py-1 ring-1 ring-black ring-opacity-5 z-50">
-                  <button
-                    onClick={openPhotoModal}
-                    className="w-full text-left px-4 py-2 text-sm text-text hover:bg-secondary-hover"
-                  >
-                    Trocar Foto
-                  </button>
-                  <div className="border-t border-border my-1"></div>
-                  <button
-                    onClick={logout}
-                    className="w-full text-left px-4 py-2 text-sm text-text hover:bg-secondary-hover"
-                  >
-                    Sair
-                  </button>
-                </div>
-              )}
-            </div>
+            <>
+              <Link to={`/admin/event/${user.eventId}/company-calls-dashboard`} className="relative p-2 rounded-full hover:bg-secondary-hover transition-colors" aria-label="Notificações de chamados">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                  {pendingCallsCount > 0 && (
+                      <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-md">
+                          {pendingCallsCount}
+                      </span>
+                  )}
+              </Link>
+              <div className="relative" ref={userMenuRef}>
+                <button onClick={() => setIsUserMenuOpen(prev => !prev)} className="flex items-center gap-2 rounded-full p-1 hover:bg-secondary-hover transition-colors">
+                  <img src={user.photoUrl || 'https://via.placeholder.com/150'} alt={user.name} className="w-8 h-8 sm:w-10 sm:h-10 rounded-full object-cover border-2 border-primary" />
+                  <span className="hidden sm:inline font-semibold text-sm">{user.name}</span>
+                </button>
+                {isUserMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-48 bg-card rounded-md shadow-lg py-1 ring-1 ring-black ring-opacity-5 z-50">
+                    <button
+                      onClick={openPhotoModal}
+                      className="w-full text-left px-4 py-2 text-sm text-text hover:bg-secondary-hover"
+                    >
+                      Trocar Foto
+                    </button>
+                    <div className="border-t border-border my-1"></div>
+                    <button
+                      onClick={logout}
+                      className="w-full text-left px-4 py-2 text-sm text-text hover:bg-secondary-hover"
+                    >
+                      Sair
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
           ) : staffInfo ? (
               <>
                 <div className="flex items-center gap-2">

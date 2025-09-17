@@ -14,6 +14,9 @@ import TasksView from '../../components/Admin/TasksView';
 import StockControlManager from '../../components/Admin/StockControlManager';
 import StockReportView from '../../components/Admin/StockReportView';
 import NotificationsManager from '../../components/Admin/NotificationsManager';
+import CompanyCallManager from '../../components/Admin/CompanyCallManager';
+import CompanyCallsDashboard from '../../components/Admin/CompanyCallsDashboard';
+import TelaoRequestsDashboard from '../../components/Admin/TelaoRequestsDashboard';
 
 const EventDashboardPage: React.FC = () => {
   const { eventId } = useParams<{ eventId: string }>();
@@ -35,6 +38,9 @@ const EventDashboardPage: React.FC = () => {
         <Route path="buttons" element={<ButtonsManager />} />
         <Route path="sales-checkin" element={<SalesCheckinManager eventId={eventId} />} />
         <Route path="notify-call" element={<NotifyCallManager eventId={eventId} />} />
+        <Route path="company-calls" element={<CompanyCallManager eventId={eventId} />} />
+        <Route path="company-calls-dashboard" element={<CompanyCallsDashboard />} />
+        <Route path="telao-requests" element={<TelaoRequestsDashboard />} />
         <Route path="stock-control" element={<StockControlManager eventId={eventId} />} />
         <Route path="stock-report" element={<StockReportView eventId={eventId} />} />
         <Route path="notifications" element={<NotificationsManager eventId={eventId} />} />

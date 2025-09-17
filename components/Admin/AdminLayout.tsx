@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { NavLink, Outlet, useParams, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -49,6 +48,12 @@ const AdminLayout: React.FC = () => {
           <NavLink to={`/admin/event/${eventId}/ranking`} className={navLinkClasses}>
             Ranking
           </NavLink>
+           <NavLink to={`/admin/event/${eventId}/company-calls-dashboard`} className={navLinkClasses}>
+            Painel de Chamados
+          </NavLink>
+          <NavLink to={`/admin/event/${eventId}/telao-requests`} className={navLinkClasses}>
+            Solicitações de Telão
+          </NavLink>
           <NavLink to={`/admin/event/${eventId}/companies`} className={navLinkClasses}>
             Empresas
           </NavLink>
@@ -65,13 +70,16 @@ const AdminLayout: React.FC = () => {
             Check-in de Vendas
           </NavLink>
           <NavLink to={`/admin/event/${eventId}/notify-call`} className={navLinkClasses}>
-            Abrir Chamado
+            Chamados (Equipe)
+          </NavLink>
+          <NavLink to={`/admin/event/${eventId}/company-calls`} className={navLinkClasses}>
+            Chamados (Empresas)
           </NavLink>
           <NavLink to={`/admin/event/${eventId}/stock-control`} className={navLinkClasses}>
             Log de controle de estoque
           </NavLink>
           <NavLink to={`/admin/event/${eventId}/stock-report`} className={navLinkClasses}>
-            Relatório de Estoque
+            Movimentação de Estoque
           </NavLink>
           <NavLink to={`/admin/event/${eventId}/notifications`} className={navLinkClasses}>
             Configurar Notificações

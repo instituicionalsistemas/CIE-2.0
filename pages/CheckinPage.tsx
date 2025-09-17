@@ -44,8 +44,7 @@ const CheckinPage: React.FC = () => {
         const { collaborator, company, event } = result.data;
         sessionStorage.setItem('collaboratorCheckinInfo', JSON.stringify({
           boothCode: boothCode.toUpperCase(),
-          companyName: company.name,
-          companyId: company.id,
+          company: company,
           collaborator: collaborator,
           eventId: event.id,
         }));

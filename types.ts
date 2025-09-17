@@ -60,6 +60,7 @@ export interface ParticipantCompany {
   responsiblePhone?: string;
   buttonIds: string[];
   logoUrl?: string;
+  canOpenCall?: boolean;
 }
 
 export interface Collaborator {
@@ -79,6 +80,7 @@ export interface Vehicle {
   companyId: string;
   marca: string;
   model: string;
+  placa?: string;
   photoUrl: string;
   createdAt: string;
   status: 'Disponível' | 'Vendido';
@@ -171,6 +173,7 @@ export interface FullStockMovement {
   vehicle: {
     marca: string;
     model: string;
+    placa?: string;
     photoUrl?: string;
   } | null;
   company: {
@@ -180,4 +183,50 @@ export interface FullStockMovement {
   staff: {
     name: string;
   } | null;
+}
+
+export enum CallStatus {
+  PENDENTE = 'Pendente',
+  CONCLUIDO = 'Concluído',
+}
+
+export interface CompanyCall {
+  id: string;
+  createdAt: string;
+  eventId: string;
+  participantCompanyId: string;
+  departmentId: string;
+  collaboratorName: string;
+  observation?: string;
+  status: CallStatus;
+  resolvedByStaffId?: string;
+  resolverFeedback?: string;
+  resolvedAt?: string;
+  // Joined data for display
+  company?: { name: string; logoUrl?: string };
+  department?: { name:string };
+  staff?: { name: string };
+}
+
+export enum TelaoRequestStatus {
+  PENDENTE = 'Pendente',
+  CONCLUIDO = 'Concluído',
+}
+
+export interface TelaoRequest {
+  id: string;
+  createdAt: string;
+  eventId: string;
+  participantCompanyId: string;
+  collaboratorId?: string;
+  vehicleId?: string;
+  status: TelaoRequestStatus;
+  resolvedByStaffId?: string;
+  resolverFeedback?: string;
+  resolvedAt?: string;
+  // Joined data for display
+  company?: { name: string; logoUrl?: string };
+  collaborator?: { name: string };
+  vehicle?: { marca: string; model: string };
+  staff?: { name: string };
 }

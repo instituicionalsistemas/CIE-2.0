@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
@@ -21,9 +20,13 @@ import {
     uploadImage,
     apiBulkAddVehicles,
     addStockMovement,
-    getStockMovementsByCompany
+    getStockMovementsByCompany,
+    getPendingCompanyCallsForStaff,
+    resolveCompanyCall,
+    getPendingTelaoRequestsForEvent,
+    resolveTelaoRequest
 } from '../services/api';
-import { ReportButtonConfig, ReportType, Department, Staff, AssignedTask, ReportSubmission, ParticipantCompany, StaffActivity, Vehicle, StockMovement } from '../types';
+import { ReportButtonConfig, ReportType, Department, Staff, AssignedTask, ReportSubmission, ParticipantCompany, StaffActivity, Vehicle, StockMovement, CompanyCall, TelaoRequest } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Button from '../components/Button';
 import Modal from '../components/Modal';
@@ -53,6 +56,7 @@ const DEFAULT_VEHICLE_PHOTO = 'https://ngukhhydpltectxrmvot.supabase.co/storage/
 const emptyVehicle: Omit<Vehicle, 'id' | 'createdAt'> = {
   marca: '',
   model: '',
+  placa: '',
   photoUrl: DEFAULT_VEHICLE_PHOTO,
   companyId: '',
   status: 'Disponível'
@@ -125,6 +129,7 @@ const InformesPage: React.FC = () => {
   const [isSubmittingVehicle, setIsSubmittingVehicle] = useState(false);
   const [vehicleToDelete, setVehicleToDelete] = useState<string | null>(null);
   const [isConfirmVehicleDeleteOpen, setIsConfirmVehicleDeleteOpen] = useState(false);
+  const [vehicleSearchTerm, setVehicleSearchTerm] = useState('');
 
   // State for Import Modal
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -140,6 +145,21 @@ const InformesPage: React.FC = () => {
   const [stockSubmitStatus, setStockSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [lastSubmittedVehicle, setLastSubmittedVehicle] = useState<{id: string, type: 'Venda' | 'Teste Drive'} | null>(null);
 
+  // State for Company Calls
+  const [pendingCompanyCalls, setPendingCompanyCalls] = useState<CompanyCall[]>([]);
+  const [isCallsModalOpen, setIsCallsModalOpen] = useState(false);
+  const [isResolveModalOpen, setIsResolveModalOpen] = useState(false);
+  const [currentCallToResolve, setCurrentCallToResolve] = useState<CompanyCall | null>(null);
+  const [feedbackText, setFeedbackText] = useState('');
+  const [resolvingCall, setResolvingCall] = useState(false);
+  
+  // State for Telão Requests
+  const [pendingTelaoRequests, setPendingTelaoRequests] = useState<TelaoRequest[]>([]);
+  const [isTelaoModalOpen, setIsTelaoModalOpen] = useState(false);
+  const [isResolveTelaoModalOpen, setIsResolveTelaoModalOpen] = useState(false);
+  const [currentTelaoToResolve, setCurrentTelaoToResolve] = useState<TelaoRequest | null>(null);
+  const [telaoFeedbackText, setTelaoFeedbackText] = useState('');
+  const [resolvingTelao, setResolvingTelao] = useState(false);
 
   // Refs for camera functionality
   const [isCameraOpen, setIsCameraOpen] = useState(false);
@@ -184,10 +204,10 @@ const InformesPage: React.FC = () => {
             getButtonConfigs(),
             getDepartmentsByEvent(eventIdForFetch),
             getStaffByEvent(eventIdForFetch),
-            getPendingTasksForStaff(staffIdForFetch),
+            getPendingTasksForStaff(staffIdForFetch, eventIdForFetch),
             getReportsByEvent(eventIdForFetch),
             getParticipantCompaniesByEvent(eventIdForFetch),
-            getStaffActivity(staffIdForFetch)
+            getStaffActivity(staffIdForFetch, eventIdForFetch)
         ]);
         setPendingTasks(tasks);
         setDepartments(depts);
@@ -222,6 +242,40 @@ const InformesPage: React.FC = () => {
     };
     fetchInitialData();
   }, [boothCode, navigate]);
+
+  useEffect(() => {
+    const fetchCalls = async () => {
+        if (checkinInfo?.eventId && checkinInfo?.departmentId) {
+            try {
+                const calls = await getPendingCompanyCallsForStaff(checkinInfo.eventId, checkinInfo.departmentId);
+                setPendingCompanyCalls(calls);
+            } catch (e) {
+                console.error("Failed to fetch pending calls", e);
+            }
+        }
+    }
+    fetchCalls(); // Initial fetch
+    const intervalId = setInterval(fetchCalls, 15000); // Poll every 15 seconds
+
+    return () => clearInterval(intervalId); // Cleanup interval on component unmount
+  }, [checkinInfo]);
+  
+  useEffect(() => {
+    const fetchTelaoRequests = async () => {
+        if (checkinInfo?.eventId) {
+            try {
+                const requests = await getPendingTelaoRequestsForEvent(checkinInfo.eventId);
+                setPendingTelaoRequests(requests);
+            } catch (e) {
+                console.error("Failed to fetch pending telão requests", e);
+            }
+        }
+    }
+    fetchTelaoRequests();
+    const intervalId = setInterval(fetchTelaoRequests, 15000);
+
+    return () => clearInterval(intervalId);
+  }, [checkinInfo]);
 
   const visibleButtons = useMemo(() => {
     if (!checkinInfo || !checkinInfo.staffId) return [];
@@ -413,7 +467,7 @@ const InformesPage: React.FC = () => {
     };
 
     try {
-      await submitSalesCheckin(payload, checkinInfo.staffId);
+      await submitSalesCheckin(payload, checkinInfo.staffId, checkinInfo.eventId);
       setSalesSubmitStatus('success');
       setTimeout(() => setIsSalesModalOpen(false), 2000);
     } catch (error) {
@@ -530,7 +584,7 @@ const InformesPage: React.FC = () => {
               actionResponse: taskDetails || 'Tarefa Concluída.'
           });
           // Refresh list
-          const updatedTasks = await getPendingTasksForStaff(checkinInfo.staffId);
+          const updatedTasks = await getPendingTasksForStaff(checkinInfo.staffId, checkinInfo.eventId);
           setPendingTasks(updatedTasks);
       } catch (error) {
           console.error("Failed to complete task", error);
@@ -569,7 +623,8 @@ const InformesPage: React.FC = () => {
 
     const handleVehicleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target;
-        setCurrentVehicle(prev => ({ ...prev, [name]: value }));
+        const finalValue = name === 'placa' ? value.toUpperCase() : value;
+        setCurrentVehicle(prev => ({ ...prev, [name]: finalValue }));
     };
 
     const handleVehiclePhotoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -880,7 +935,7 @@ const InformesPage: React.FC = () => {
         setStockSubmitStatus('idle');
         let wasSuccessful = false;
         try {
-            await addStockMovement(checkinInfo.staffId, checkinInfo.companyId, vehicle.id, type);
+            await addStockMovement(checkinInfo.staffId, checkinInfo.companyId, vehicle.id, type, checkinInfo.eventId);
             setStockSubmitStatus('success');
             setLastSubmittedVehicle({id: vehicle.id, type});
             wasSuccessful = true;
@@ -897,6 +952,70 @@ const InformesPage: React.FC = () => {
                 setStockSubmitStatus('idle');
                 setLastSubmittedVehicle(null);
             }, 3000);
+        }
+    };
+
+    const filteredVehicles = useMemo(() => {
+        if (!vehicleSearchTerm) {
+            return vehicles;
+        }
+        return vehicles.filter(v =>
+            v.placa && v.placa.includes(vehicleSearchTerm)
+        );
+    }, [vehicles, vehicleSearchTerm]);
+
+  const handleOpenCallsModal = () => setIsCallsModalOpen(true);
+  const handleCloseCallsModal = () => setIsCallsModalOpen(false);
+  
+  const handleOpenResolveModal = (call: CompanyCall) => {
+    setCurrentCallToResolve(call);
+    setFeedbackText('');
+    setIsResolveModalOpen(true);
+  };
+  const handleCloseResolveModal = () => {
+    setIsResolveModalOpen(false);
+    setCurrentCallToResolve(null);
+  };
+
+  const handleResolveCall = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentCallToResolve || !checkinInfo?.staffId || !feedbackText) return;
+    setResolvingCall(true);
+    try {
+      await resolveCompanyCall(currentCallToResolve.id, checkinInfo.staffId, feedbackText);
+      setPendingCompanyCalls(prev => prev.filter(c => c.id !== currentCallToResolve.id));
+      handleCloseResolveModal();
+    } catch (error) {
+      console.error("Failed to resolve call", error);
+    } finally {
+      setResolvingCall(false);
+    }
+  };
+  
+    // --- Telão Request Handlers ---
+    const handleOpenTelaoModal = () => setIsTelaoModalOpen(true);
+    const handleCloseTelaoModal = () => setIsTelaoModalOpen(false);
+    const handleOpenResolveTelaoModal = (req: TelaoRequest) => {
+        setCurrentTelaoToResolve(req);
+        setTelaoFeedbackText('');
+        setIsResolveTelaoModalOpen(true);
+    };
+    const handleCloseResolveTelaoModal = () => {
+        setIsResolveTelaoModalOpen(false);
+        setCurrentTelaoToResolve(null);
+    };
+    const handleResolveTelao = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!currentTelaoToResolve || !checkinInfo?.staffId || !telaoFeedbackText) return;
+        setResolvingTelao(true);
+        try {
+            await resolveTelaoRequest(currentTelaoToResolve.id, checkinInfo.staffId, telaoFeedbackText);
+            setPendingTelaoRequests(prev => prev.filter(r => r.id !== currentTelaoToResolve.id));
+            handleCloseResolveTelaoModal();
+        } catch (error) {
+            console.error("Failed to resolve telão request", error);
+        } finally {
+            setResolvingTelao(false);
         }
     };
 
@@ -940,6 +1059,22 @@ const InformesPage: React.FC = () => {
           </Button>
           <Button onClick={handleOpenVehicleModal} className="w-full">
               Estoque de Veículos
+          </Button>
+          <Button onClick={handleOpenCallsModal} className="relative w-full">
+              Chamados Abertos
+              {pendingCompanyCalls.length > 0 && (
+                  <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-md animate-pulse">
+                      {pendingCompanyCalls.length}
+                  </span>
+              )}
+          </Button>
+          <Button onClick={handleOpenTelaoModal} className="relative w-full">
+              Solicitações de Telão
+              {pendingTelaoRequests.length > 0 && (
+                  <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-xs font-bold text-white shadow-md animate-pulse">
+                      {pendingTelaoRequests.length}
+                  </span>
+              )}
           </Button>
           {checkinInfo?.staffId && salesCheckinStaffIds.includes(checkinInfo.staffId) && (
               <Button onClick={openSalesCheckinModal} className="w-full">
@@ -1384,6 +1519,7 @@ const InformesPage: React.FC = () => {
                 </div>
                 <Input id="vehicle-marca" name="marca" label="Marca do Veículo" value={(currentVehicle as Vehicle).marca} onChange={handleVehicleChange} required />
                 <Input id="vehicle-model" name="model" label="Modelo" value={(currentVehicle as Vehicle).model} onChange={handleVehicleChange} required />
+                <Input id="vehicle-placa" name="placa" label="Placa" value={(currentVehicle as Vehicle).placa || ''} onChange={handleVehicleChange} />
                 <div className="flex justify-end gap-2">
                     {isEditingVehicle && <Button type="button" variant="secondary" onClick={handleCancelEditVehicle}>Cancelar Edição</Button>}
                     <Button type="submit" disabled={isSubmittingVehicle}>
@@ -1394,15 +1530,24 @@ const InformesPage: React.FC = () => {
 
             <div className="border-t border-border pt-4">
                 <h4 className="font-semibold mb-2">Veículos Cadastrados</h4>
+                <Input 
+                    id="vehicle-search-staff"
+                    label=""
+                    placeholder="Buscar por Placa..."
+                    value={vehicleSearchTerm}
+                    onChange={(e) => setVehicleSearchTerm(e.target.value.toUpperCase())}
+                    className="mb-4"
+                />
                 <div className="space-y-3 max-h-64 overflow-y-auto pr-2">
                     {vehiclesLoading ? <LoadingSpinner /> : (
-                    vehicles.length > 0 ? vehicles.map(vehicle => (
+                    filteredVehicles.length > 0 ? filteredVehicles.map(vehicle => (
                         <div key={vehicle.id} className="flex justify-between items-center p-2 bg-secondary rounded-md">
                         <div className="flex items-center gap-3">
                             <img src={vehicle.photoUrl} alt={vehicle.marca} className="w-12 h-12 rounded-md object-cover" />
                             <div>
                             <p className="font-semibold">{vehicle.marca}</p>
                             <p className="text-sm text-text-secondary">{vehicle.model}</p>
+                            <p className="text-sm text-text-secondary">Placa: {vehicle.placa || 'N/D'}</p>
                             </div>
                         </div>
                         <div className="flex gap-2">
@@ -1410,7 +1555,7 @@ const InformesPage: React.FC = () => {
                             <Button variant="danger" className="py-1 px-2 text-xs" onClick={() => handleDeleteVehicleClick(vehicle.id)}>Excluir</Button>
                         </div>
                         </div>
-                    )) : <p className="text-center text-text-secondary py-4">Nenhum veículo cadastrado.</p>
+                    )) : <p className="text-center text-text-secondary py-4">{vehicleSearchTerm ? 'Nenhum veículo encontrado para a busca.' : 'Nenhum veículo cadastrado.'}</p>
                     )}
                 </div>
             </div>
@@ -1476,6 +1621,110 @@ const InformesPage: React.FC = () => {
                 </div>
             )}
         </div>
+      </Modal>
+      
+      {/* Company Calls Modals */}
+      <Modal isOpen={isCallsModalOpen} onClose={handleCloseCallsModal} title="Chamados Pendentes">
+        <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+          {pendingCompanyCalls.length > 0 ? (
+            pendingCompanyCalls.map(call => (
+              <div key={call.id} className="p-4 bg-secondary rounded-lg flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                <div className="flex-grow">
+                  <p className="font-bold text-primary">{call.company?.name || 'Empresa desconhecida'}</p>
+                  <p>Colaborador: <span className="font-semibold">{call.collaboratorName}</span></p>
+                  <p className="text-sm text-text-secondary mt-2 pt-2 border-t border-border/50">{call.observation}</p>
+                  <p className="text-xs text-text-secondary mt-2">
+                    Aberto em: {new Date(call.createdAt).toLocaleString('pt-BR')}
+                  </p>
+                </div>
+                <Button 
+                  onClick={() => handleOpenResolveModal(call)}
+                  className="flex-shrink-0 self-end sm:self-center"
+                  variant="primary"
+                >
+                  Resolver
+                </Button>
+              </div>
+            ))
+          ) : (
+            <p className="text-center text-text-secondary py-8">Nenhum chamado pendente para o seu departamento.</p>
+          )}
+        </div>
+      </Modal>
+
+      <Modal isOpen={isResolveModalOpen} onClose={handleCloseResolveModal} title={`Resolver Chamado de ${currentCallToResolve?.company?.name}`}>
+        <form onSubmit={handleResolveCall} className="space-y-4">
+          <div>
+            <label htmlFor="feedback" className="block text-sm font-medium mb-1">Feedback / Resolução</label>
+            <textarea
+              id="feedback"
+              value={feedbackText}
+              onChange={(e) => setFeedbackText(e.target.value)}
+              rows={4}
+              className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+              placeholder="Descreva a ação tomada para resolver este chamado."
+              required
+            />
+          </div>
+          <div className="flex justify-end gap-4 pt-4">
+            <Button type="button" variant="secondary" onClick={handleCloseResolveModal} disabled={resolvingCall}>Cancelar</Button>
+            <Button type="submit" disabled={resolvingCall}>
+              {resolvingCall ? <LoadingSpinner /> : 'Concluir Chamado'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Telão Requests Modals */}
+      <Modal isOpen={isTelaoModalOpen} onClose={handleCloseTelaoModal} title="Solicitações de Telão Pendentes">
+        <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+          {pendingTelaoRequests.length > 0 ? (
+            pendingTelaoRequests.map(req => (
+              <div key={req.id} className="p-4 bg-secondary rounded-lg flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                <div className="flex-grow">
+                  <p className="font-bold text-primary">{req.company?.name || 'Empresa desconhecida'}</p>
+                  <p>Vendedor: <span className="font-semibold">{req.collaborator?.name}</span></p>
+                  <p className="text-sm text-text-secondary mt-2 pt-2 border-t border-border/50">Veículo: {req.vehicle?.marca} {req.vehicle?.model}</p>
+                  <p className="text-xs text-text-secondary mt-2">
+                    Aberto em: {new Date(req.createdAt).toLocaleString('pt-BR')}
+                  </p>
+                </div>
+                <Button 
+                  onClick={() => handleOpenResolveTelaoModal(req)}
+                  className="flex-shrink-0 self-end sm:self-center"
+                  variant="primary"
+                >
+                  Resolver
+                </Button>
+              </div>
+            ))
+          ) : (
+            <p className="text-center text-text-secondary py-8">Nenhuma solicitação de telão pendente.</p>
+          )}
+        </div>
+      </Modal>
+
+      <Modal isOpen={isResolveTelaoModalOpen} onClose={handleCloseResolveTelaoModal} title={`Resolver Solicitação de ${currentTelaoToResolve?.company?.name}`}>
+        <form onSubmit={handleResolveTelao} className="space-y-4">
+          <div>
+            <label htmlFor="telao-feedback" className="block text-sm font-medium mb-1">Feedback / Resolução</label>
+            <textarea
+              id="telao-feedback"
+              value={telaoFeedbackText}
+              onChange={(e) => setTelaoFeedbackText(e.target.value)}
+              rows={4}
+              className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+              placeholder="Descreva a ação tomada para atender a esta solicitação."
+              required
+            />
+          </div>
+          <div className="flex justify-end gap-4 pt-4">
+            <Button type="button" variant="secondary" onClick={handleCloseResolveTelaoModal} disabled={resolvingTelao}>Cancelar</Button>
+            <Button type="submit" disabled={resolvingTelao}>
+              {resolvingTelao ? <LoadingSpinner /> : 'Concluir Solicitação'}
+            </Button>
+          </div>
+        </form>
       </Modal>
 
       {/* Import Modal */}

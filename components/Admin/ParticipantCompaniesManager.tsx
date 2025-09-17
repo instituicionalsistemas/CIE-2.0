@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
     getParticipantCompaniesByEvent, 
@@ -46,6 +47,7 @@ const DEFAULT_VEHICLE_PHOTO = 'https://ngukhhydpltectxrmvot.supabase.co/storage/
 const emptyVehicle: Omit<Vehicle, 'id' | 'createdAt'> = {
   marca: '',
   model: '',
+  placa: '',
   photoUrl: DEFAULT_VEHICLE_PHOTO,
   companyId: '',
   status: 'Disponível'
@@ -401,7 +403,8 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
 
     const handleVehicleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target;
-        setCurrentVehicle(prev => ({ ...prev, [name]: value }));
+        const finalValue = name === 'placa' ? value.toUpperCase() : value;
+        setCurrentVehicle(prev => ({ ...prev, [name]: finalValue }));
     };
 
     const handleVehiclePhotoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -549,7 +552,7 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
     const processParsedData = async (data: any[], fields: string[]) => {
         if (!selectedCompany) return;
 
-        const requiredColumns = ['Marca', 'Modelo'];
+        const requiredColumns = ['Marca', 'Modelo', 'Placa'];
         const fileColumns = fields.map(f => f.trim());
 
         if (!requiredColumns.every(col => fileColumns.includes(col))) {
@@ -559,25 +562,30 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
         }
 
         const newVehicles: Omit<Vehicle, 'id' | 'createdAt'>[] = data
-            .map((row: any) => {
+            // FIX: Add an explicit return type to the map callback to prevent type widening on the 'status' property.
+            .map((row: any): Omit<Vehicle, 'id' | 'createdAt'> | null => {
                 const trimmedRow = Object.keys(row).reduce((acc, key) => {
                     acc[key.trim()] = row[key];
                     return acc;
                 }, {} as any);
+
                 const marca = trimmedRow['Marca']?.toString().trim();
                 const model = trimmedRow['Modelo']?.toString().trim();
-                if (!marca || !model) {
+                const placa = trimmedRow['Placa']?.toString().trim();
+
+                if (!marca || !model || !placa) {
                     return null;
                 }
                 return {
                     marca,
                     model,
+                    placa,
                     photoUrl: DEFAULT_VEHICLE_PHOTO,
                     status: 'Disponível',
                     companyId: selectedCompany.id,
                 };
             })
-            .filter((v: any): v is Omit<Vehicle, 'id' | 'createdAt'> => v !== null);
+            .filter((v): v is Omit<Vehicle, 'id' | 'createdAt'> => v !== null);
 
         if (newVehicles.length === 0) {
             setImportError('Nenhum veículo válido encontrado na planilha.');
@@ -602,7 +610,7 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
             setIsImporting(false);
         }
     };
-
+    
     const handleOpenImportModal = () => {
         setImportError(null);
         setImportSuccessMessage(null);
@@ -610,7 +618,7 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
     };
 
     const handleDownloadTemplate = () => {
-        const headers = 'Marca,Modelo';
+        const headers = 'Marca,Modelo,Placa';
         const csvContent = "data:text/csv;charset=utf-8," + headers;
         const encodedUri = encodeURI(csvContent);
         const link = document.createElement("a");
@@ -697,9 +705,11 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
   }, [collaborators, collaboratorSearchTerm]);
 
   const filteredVehicles = useMemo(() => {
+    if (!vehicleSearchTerm) {
+        return vehicles;
+    }
     return vehicles.filter(v =>
-        v.marca.toLowerCase().includes(vehicleSearchTerm.toLowerCase()) ||
-        v.model.toLowerCase().includes(vehicleSearchTerm.toLowerCase())
+        v.placa && v.placa.includes(vehicleSearchTerm)
     );
   }, [vehicles, vehicleSearchTerm]);
 
@@ -985,6 +995,7 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
                     </div>
                     <Input id="vehicle-marca" name="marca" label="Marca do Veículo" value={(currentVehicle as Vehicle).marca} onChange={handleVehicleChange} required />
                     <Input id="vehicle-model" name="model" label="Modelo" value={(currentVehicle as Vehicle).model} onChange={handleVehicleChange} required />
+                    <Input id="vehicle-placa" name="placa" label="Placa" value={(currentVehicle as Vehicle).placa || ''} onChange={handleVehicleChange} />
                     <div className="flex justify-end gap-2">
                         {isEditingVehicle && <Button type="button" variant="secondary" onClick={handleCancelEditVehicle}>Cancelar Edição</Button>}
                         <Button type="submit" disabled={isSubmittingVehicle}>
@@ -1000,9 +1011,9 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
                         <Input
                             id="vehicle-search"
                             label=""
-                            placeholder="Buscar por marca ou modelo..."
+                            placeholder="Buscar por Placa..."
                             value={vehicleSearchTerm}
-                            onChange={(e) => setVehicleSearchTerm(e.target.value)}
+                            onChange={(e) => setVehicleSearchTerm(e.target.value.toUpperCase())}
                             className="flex-grow w-full sm:w-auto mb-0"
                         />
                       <div className="flex gap-2 w-full sm:w-auto">
@@ -1019,6 +1030,7 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
                                 <div>
                                 <p className="font-semibold">{vehicle.marca}</p>
                                 <p className="text-sm text-text-secondary">{vehicle.model}</p>
+                                <p className="text-sm text-text-secondary">Placa: {vehicle.placa || 'N/D'}</p>
                                 </div>
                             </div>
                             <div className="flex gap-2">
@@ -1026,7 +1038,7 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
                                 <Button variant="danger" className="py-1 px-2 text-xs" onClick={() => handleDeleteVehicleClick(vehicle.id)}>Excluir</Button>
                             </div>
                             </div>
-                        )) : <p className="text-center text-text-secondary py-4">Nenhum veículo encontrado.</p>
+                        )) : <p className="text-center text-text-secondary py-4">{vehicleSearchTerm ? 'Nenhum veículo encontrado para a busca.' : 'Nenhum veículo cadastrado.'}</p>
                         )}
                     </div>
                 </div>
@@ -1037,7 +1049,7 @@ const ParticipantCompaniesManager: React.FC<Props> = ({ eventId }) => {
       {/* Import Modal */}
       <Modal isOpen={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} title="Importar Estoque via Planilha">
           <div className="space-y-4">
-              <p className="text-text-secondary">Envie um arquivo <code className="bg-background text-primary px-1 rounded">.csv, .xls ou .xlsx</code> com as colunas: <code className="bg-background text-primary px-1 rounded">Marca</code> (obrigatório), <code className="bg-background text-primary px-1 rounded">Modelo</code> (obrigatório)</p>
+              <p className="text-text-secondary">Envie um arquivo <code className="bg-background text-primary px-1 rounded">.csv, .xls ou .xlsx</code> com as colunas: <code className="bg-background text-primary px-1 rounded">Marca</code> (obrigatório), <code className="bg-background text-primary px-1 rounded">Modelo</code> (obrigatório), <code className="bg-background text-primary px-1 rounded">Placa</code> (obrigatório)</p>
               
               <Button onClick={handleDownloadTemplate} variant="secondary" className="w-full">Baixar Planilha Modelo (.csv)</Button>
               

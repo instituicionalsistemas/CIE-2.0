@@ -4,9 +4,11 @@ import {
     getVehiclesByCompany, 
     updateVehicle,
     getEventSalesData,
-    sendTelaoNotification
+    sendTelaoNotification,
+    getDepartmentsByEvent,
+    submitCompanyCall
 } from '../services/api';
-import { Vehicle, Collaborator, CompanySalesData } from '../types';
+import { Vehicle, Collaborator, CompanySalesData, ParticipantCompany, Department } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
 import Button from '../components/Button';
 import Modal from '../components/Modal';
@@ -17,7 +19,7 @@ const CollaboratorPage: React.FC = () => {
   const { boothCode } = useParams<{ boothCode: string }>();
   const navigate = useNavigate();
   
-  const [checkinInfo, setCheckinInfo] = useState<{ companyName: string; companyId: string; boothCode: string; collaborator: Collaborator; eventId: string; } | null>(null);
+  const [checkinInfo, setCheckinInfo] = useState<{ company: ParticipantCompany; collaborator: Collaborator; eventId: string; } | null>(null);
   const [collaborator, setCollaborator] = useState<Collaborator | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +33,15 @@ const CollaboratorPage: React.FC = () => {
   const [isRankingModalOpen, setIsRankingModalOpen] = useState(false);
   const [salesData, setSalesData] = useState<CompanySalesData[]>([]);
   const [rankingLoading, setRankingLoading] = useState(false);
+  
+  // State for Company Call
+  const [isCompanyCallModalOpen, setIsCompanyCallModalOpen] = useState(false);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
+  const [observation, setObservation] = useState('');
+  const [callSubmitting, setCallSubmitting] = useState(false);
+  const [callSubmitStatus, setCallSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle');
+
 
   useEffect(() => {
     const checkinInfoRaw = sessionStorage.getItem('collaboratorCheckinInfo');
@@ -48,20 +59,29 @@ const CollaboratorPage: React.FC = () => {
   }, [navigate]);
   
   useEffect(() => {
-    const fetchAllVehicles = async () => {
-      if (checkinInfo?.companyId) {
+    const fetchInitialData = async () => {
+      if (checkinInfo?.company.id) {
         setLoading(true);
         try {
-          const data = await getVehiclesByCompany(checkinInfo.companyId);
-          setVehicles(data);
+          const vehiclesData = await getVehiclesByCompany(checkinInfo.company.id);
+          setVehicles(vehiclesData);
+
+          if(checkinInfo.company.canOpenCall) {
+            const departmentsData = await getDepartmentsByEvent(checkinInfo.eventId);
+            setDepartments(departmentsData);
+            if (departmentsData.length > 0) {
+              setSelectedDepartmentId(departmentsData[0].id);
+            }
+          }
+
         } catch (err) {
-          setError('Falha ao carregar dados de veículos.');
+          setError('Falha ao carregar dados.');
         } finally {
           setLoading(false);
         }
       }
     };
-    fetchAllVehicles();
+    fetchInitialData();
   }, [checkinInfo]);
 
   useEffect(() => {
@@ -122,11 +142,11 @@ const CollaboratorPage: React.FC = () => {
           checkinInfo.eventId,
           vehicleToUpdate,
           collaborator,
-          checkinInfo.companyName
+          checkinInfo.company
       );
 
       const [updatedVehicles, updatedSalesData] = await Promise.all([
-          getVehiclesByCompany(checkinInfo.companyId),
+          getVehiclesByCompany(checkinInfo.company.id),
           getEventSalesData(checkinInfo.eventId)
       ]);
       setVehicles(updatedVehicles);
@@ -138,6 +158,44 @@ const CollaboratorPage: React.FC = () => {
       setVehicleToUpdate(null);
     }
   };
+  
+  const handleOpenCompanyCallModal = () => {
+    setObservation('');
+    setCallSubmitStatus('idle');
+    if (departments.length > 0) {
+        setSelectedDepartmentId(departments[0].id);
+    }
+    setIsCompanyCallModalOpen(true);
+  };
+  
+  const handleCompanyCallSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!checkinInfo || !collaborator || !selectedDepartmentId || !observation) return;
+    setCallSubmitting(true);
+    setCallSubmitStatus('idle');
+    try {
+        const department = departments.find(d => d.id === selectedDepartmentId);
+        if (!department) throw new Error("Departamento não encontrado");
+
+        await submitCompanyCall({
+            eventId: checkinInfo.eventId,
+            participantCompanyId: checkinInfo.company.id,
+            departmentId: department.id,
+            collaboratorName: collaborator.name,
+            observation: observation,
+            companyName: checkinInfo.company.name,
+            departmentName: department.name,
+            boothCode: checkinInfo.company.boothCode,
+        });
+        setCallSubmitStatus('success');
+        setTimeout(() => setIsCompanyCallModalOpen(false), 2000);
+    } catch (err) {
+        setCallSubmitStatus('error');
+        console.error("Failed to submit company call:", err);
+    } finally {
+        setCallSubmitting(false);
+    }
+  };
 
   if (loading || !collaborator) return <LoadingSpinner />;
 
@@ -145,7 +203,7 @@ const CollaboratorPage: React.FC = () => {
     <div className="max-w-4xl mx-auto">
         <div className="mb-6">
             <h1 className="text-3xl font-bold text-primary">Painel do Colaborador</h1>
-            <p className="text-text-secondary">Empresa: <span className="font-semibold text-text">{checkinInfo?.companyName}</span></p>
+            <p className="text-text-secondary">Empresa: <span className="font-semibold text-text">{checkinInfo?.company.name}</span></p>
         </div>
 
         {error && <p className="text-red-500 text-center mb-4">{error}</p>}
@@ -155,13 +213,18 @@ const CollaboratorPage: React.FC = () => {
                 <h2 className="text-lg font-semibold text-text-secondary">Total de Veículos Vendidos</h2>
                 <p className="text-5xl font-bold text-primary mt-2">{soldVehicles.length}</p>
             </div>
-            <div className="bg-card p-6 rounded-lg shadow-lg flex flex-col sm:flex-row justify-center items-center gap-4">
+            <div className="bg-card p-6 rounded-lg shadow-lg flex flex-col justify-center items-center gap-4">
                 <Button onClick={handleOpenTelaoModal} className="w-full text-lg py-3">
                     Solicitar Telão
                 </Button>
                 <Button onClick={handleOpenRankingModal} className="w-full text-lg py-3">
                     Ranking de Vendas
                 </Button>
+                {checkinInfo?.company.canOpenCall && (
+                    <Button onClick={handleOpenCompanyCallModal} variant="secondary" className="w-full text-lg py-3">
+                        Abrir Chamado
+                    </Button>
+                )}
             </div>
         </div>
 
@@ -175,6 +238,7 @@ const CollaboratorPage: React.FC = () => {
                             <div className="flex-grow">
                                 <p className="font-bold text-text">{vehicle.marca}</p>
                                 <p className="text-sm text-text-secondary">{vehicle.model}</p>
+                                <p className="text-sm text-text-secondary">Placa: {vehicle.placa || 'N/D'}</p>
                             </div>
                             <div className="text-right flex-shrink-0">
                                 <p className="text-sm font-semibold text-primary">Vendido em:</p>
@@ -206,6 +270,7 @@ const CollaboratorPage: React.FC = () => {
                                     <div>
                                         <p className="font-bold text-text">{vehicle.marca}</p>
                                         <p className="text-sm text-text-secondary">{vehicle.model}</p>
+                                        <p className="text-sm text-text-secondary">Placa: {vehicle.placa || 'N/D'}</p>
                                     </div>
                                 </div>
                                 <Button
@@ -230,6 +295,53 @@ const CollaboratorPage: React.FC = () => {
                 salesData={salesData}
             />
         )}
+        
+        <Modal isOpen={isCompanyCallModalOpen} onClose={() => setIsCompanyCallModalOpen(false)} title="Abrir Chamado para a Organização">
+            {callSubmitStatus === 'success' ? (
+                <div className="text-center p-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 mx-auto text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="mt-4 text-lg font-semibold">Chamado aberto com sucesso!</p>
+                </div>
+            ) : (
+                <form onSubmit={handleCompanyCallSubmit} className="space-y-4">
+                    <div>
+                        <label htmlFor="department-select" className="block text-sm font-medium mb-1 text-text">Selecione o Departamento</label>
+                        <select
+                            id="department-select"
+                            value={selectedDepartmentId}
+                            onChange={(e) => setSelectedDepartmentId(e.target.value)}
+                            className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+                            required
+                        >
+                            {departments.map(dept => (
+                                <option key={dept.id} value={dept.id}>{dept.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label htmlFor="observation" className="block text-sm font-medium mb-1 text-text">Observação</label>
+                        <textarea
+                            id="observation"
+                            value={observation}
+                            onChange={(e) => setObservation(e.target.value)}
+                            rows={4}
+                            className="w-full px-3 py-2 border border-border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="Descreva o motivo do seu chamado aqui..."
+                            required
+                        />
+                    </div>
+                    {callSubmitStatus === 'error' && <p className="text-red-500 text-sm text-center">Ocorreu um erro ao enviar o chamado. Tente novamente.</p>}
+                    <div className="flex justify-end gap-4 pt-4">
+                        <Button type="button" variant="secondary" onClick={() => setIsCompanyCallModalOpen(false)} disabled={callSubmitting}>Cancelar</Button>
+                        <Button type="submit" disabled={callSubmitting}>
+                            {callSubmitting ? <LoadingSpinner /> : 'Enviar Chamado'}
+                        </Button>
+                    </div>
+                </form>
+            )}
+        </Modal>
 
         <ConfirmationModal
             isOpen={isConfirmModalOpen}

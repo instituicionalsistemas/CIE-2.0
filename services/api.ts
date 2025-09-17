@@ -15,7 +15,11 @@ import {
   Vehicle,
   CompanySalesData,
   StockMovement,
-  FullStockMovement
+  FullStockMovement,
+  CompanyCall,
+  CallStatus,
+  TelaoRequest,
+  TelaoRequestStatus
 } from '../types';
 
 // --- Supabase Client Initialization ---
@@ -205,7 +209,7 @@ export const validateCheckin = async (boothCode: string, personalCode: string) =
 export const validateCollaboratorCheckin = async (boothCode: string, collaboratorCode: string) => {
   const { data: company, error: companyError } = await supabase
     .from('participant_companies')
-    .select('id, name, event:events(*)')
+    .select('*, event:events(*)')
     .eq('booth_code', boothCode.toUpperCase())
     .single();
 
@@ -231,7 +235,7 @@ export const validateCollaboratorCheckin = async (boothCode: string, collaborato
 
   return { 
       collaborator: camelCaseKeys(collaborator) as Collaborator, 
-      company: { id: company.id, name: company.name },
+      company: camelCaseKeys(company) as ParticipantCompany,
       event: event
   };
 };
@@ -290,6 +294,7 @@ export const submitReport = async (reportData: Omit<ReportSubmission, 'id' | 'ti
   if (staff) {
     const activity = {
       staffId: staff.id,
+      eventId: reportData.eventId,
       description: `Registrou '${reportData.reportLabel}' para ${reportData.boothCode}`,
       timestamp: new Date().toISOString()
     };
@@ -297,7 +302,70 @@ export const submitReport = async (reportData: Omit<ReportSubmission, 'id' | 'ti
   }
 };
 
-export const submitSalesCheckin = async (payload: any, staffId: string) => {
+export const submitCompanyCall = async (payload: {
+    eventId: string;
+    participantCompanyId: string;
+    departmentId: string;
+    collaboratorName: string;
+    observation: string;
+    companyName: string; 
+    departmentName: string; 
+    boothCode: string; 
+}) => {
+    const callData = {
+        event_id: payload.eventId,
+        participant_company_id: payload.participantCompanyId,
+        department_id: payload.departmentId,
+        collaborator_name: payload.collaboratorName,
+        observation: payload.observation,
+        status: CallStatus.PENDENTE,
+    };
+
+    // The primary action: insert the call into the database.
+    const { data, error } = await supabase
+        .from('company_calls')
+        .insert(callData)
+        .select()
+        .single();
+        
+    if (error) {
+        // If the database insert fails, this is a critical error.
+        console.error('Failed to insert company call:', error);
+        throw new Error('Falha ao registrar o chamado.');
+    }
+    
+    // The secondary action: send a webhook notification.
+    // This is wrapped in a try/catch block to make it non-critical.
+    // If the webhook fails, the error is logged, but the function succeeds,
+    // because the call was successfully saved in the database.
+    try {
+        const webhookUrl = 'https://webhook.triad3.io/webhook/chamados-cie2-0';
+        const webhookPayload = {
+            eventId: payload.eventId,
+            companyName: payload.companyName,
+            collaboratorName: payload.collaboratorName,
+            departmentName: payload.departmentName,
+            observation: payload.observation,
+            timestamp: new Date().toISOString(),
+        };
+        const response = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(webhookPayload),
+        });
+
+        if (!response.ok) {
+            console.error('Webhook de chamado da empresa não respondeu corretamente:', response.statusText);
+        }
+    } catch (webhookError) {
+        console.error('Falha ao enviar notificação de webhook para chamado da empresa (non-critical):', webhookError);
+    }
+
+    // Return the successfully created call data.
+    return camelCaseKeys(data);
+};
+
+export const submitSalesCheckin = async (payload: any, staffId: string, eventId: string) => {
     // 1. Send webhook
     const webhookUrl = 'https://webhook.triad3.io/webhook/chek-in-vendas-cie';
     const response = await fetch(webhookUrl, {
@@ -313,8 +381,9 @@ export const submitSalesCheckin = async (payload: any, staffId: string) => {
     
     // 2. Log staff activity
     try {
-        const activity: Omit<StaffActivity, 'id'| 'timestamp'> = {
+        const activity = {
             staffId: staffId,
+            eventId: eventId,
             description: `Realizou Check-in de Vendas para ${payload.companyName} (${payload.boothCode})`,
         };
         const { error } = await supabase.from('staff_activities').insert(snakeCaseKeys({ ...activity, timestamp: new Date().toISOString() }));
@@ -420,8 +489,12 @@ const createApi = <T extends { id: string }>(tableName: string) => ({
         return camelCaseKeys(data) as T;
     },
     update: async (updatedItem: T): Promise<T> => {
-        const { data, error } = await supabase.from(tableName).update(snakeCaseKeys(updatedItem)).eq('id', updatedItem.id).select().single();
-        if (error) throw new Error(error.message);
+        const { id, ...updateData } = updatedItem;
+        const { data, error } = await supabase.from(tableName).update(snakeCaseKeys(updateData)).eq('id', id).select().single();
+        if (error) {
+            console.error(`Failed to save ${tableName}:`, error.message);
+            throw new Error(error.message);
+        }
         return camelCaseKeys(data) as T;
     },
     delete: async (id: string): Promise<void> => {
@@ -810,20 +883,35 @@ export const assignStaffToEvent = async (staffId: string, eventId: string, depar
     }
 };
 
+export const unassignStaffFromEvent = async (staffId: string, eventId: string): Promise<void> => {
+  const { error } = await supabase
+    .from('staff_event_assignments')
+    .delete()
+    .eq('staff_id', staffId)
+    .eq('event_id', eventId);
+
+  if (error) {
+    console.error("Error unassigning staff from event:", error);
+    throw new Error("Falha ao desvincular o membro da equipe do evento.");
+  }
+};
+
 export const deleteStaff = staffApi.delete;
-export const getStaffActivity = async (staffId: string): Promise<StaffActivity[]> => {
+export const getStaffActivity = async (staffId: string, eventId: string): Promise<StaffActivity[]> => {
   const { data, error } = await supabase
     .from('staff_activities')
     .select('*')
     .eq('staff_id', staffId)
+    .eq('event_id', eventId)
     .order('timestamp', { ascending: false });
   if (error) return [];
   return camelCaseKeys(data) as StaffActivity[];
 };
 
-export const apiAddTaskActivity = async (staffId: string, description: string): Promise<void> => {
+export const apiAddTaskActivity = async (staffId: string, description: string, eventId: string): Promise<void> => {
   const activity = {
     staffId,
+    eventId,
     description,
     timestamp: new Date().toISOString()
   };
@@ -959,6 +1047,7 @@ export const apiCompleteTaskActivity = async (
   const completedDescription = originalDescription.replace('Tarefa atribuída:', 'Tarefa concluída:');
   const activity = {
     staffId,
+    eventId: reportDetails.eventId,
     description: completedDescription,
     timestamp: new Date().toISOString()
   };
@@ -1018,6 +1107,7 @@ export const getAssignedTasksByEvent = async (eventId: string): Promise<Assigned
         .from('staff_activities')
         .select('*')
         .in('staff_id', staffIds)
+        .eq('event_id', eventId)
         .order('timestamp', { ascending: false });
 
     if (error) {
@@ -1065,11 +1155,12 @@ export const getAssignedTasksByEvent = async (eventId: string): Promise<Assigned
     return tasks.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 };
 
-export const getPendingTasksForStaff = async (staffId: string): Promise<AssignedTask[]> => {
+export const getPendingTasksForStaff = async (staffId: string, eventId: string): Promise<AssignedTask[]> => {
     const { data: activitiesData, error } = await supabase
         .from('staff_activities')
         .select('*')
         .eq('staff_id', staffId)
+        .eq('event_id', eventId)
         .order('timestamp', { ascending: false });
 
     if (error) {
@@ -1123,7 +1214,8 @@ export const addStockMovement = async (
   staffId: string,
   companyId: string,
   vehicleId: string,
-  type: 'Venda' | 'Teste Drive'
+  type: 'Venda' | 'Teste Drive',
+  eventId: string
 ) => {
   const movement = {
     staffId,
@@ -1145,6 +1237,7 @@ export const addStockMovement = async (
   // Also log as a general staff activity
   const activity = {
     staffId: staffId,
+    eventId: eventId,
     description: `Registrou '${type}' (Controle de Estoque) para o veículo ID ${vehicleId}`,
     timestamp: new Date().toISOString(),
   };
@@ -1190,7 +1283,7 @@ export const getStockMovementsByEvent = async (eventId: string): Promise<FullSto
             id,
             type,
             timestamp,
-            vehicle:vehicle_stock(marca, model, photo_url),
+            vehicle:vehicle_stock(marca, model, photo_url, placa),
             company:participant_companies(id, name),
             staff:staff(name)
         `)
@@ -1247,10 +1340,29 @@ export const setTelaoRecipientsForEvent = async (eventId: string, staffIds: stri
 
 export const sendTelaoNotification = async (
   eventId: string,
-  vehicle: Pick<Vehicle, 'marca' | 'model'>,
-  collaborator: Pick<Collaborator, 'name'>,
-  companyName: string
+  vehicle: Pick<Vehicle, 'id' | 'marca' | 'model'>,
+  collaborator: Pick<Collaborator, 'id' | 'name'>,
+  company: Pick<ParticipantCompany, 'id' | 'name'>
 ) => {
+  try {
+    const requestData = {
+      event_id: eventId,
+      participant_company_id: company.id,
+      collaborator_id: collaborator.id,
+      vehicle_id: vehicle.id,
+      status: TelaoRequestStatus.PENDENTE,
+    };
+    const { error: requestError } = await supabase
+      .from('telao_requests')
+      .insert(requestData);
+    
+    if (requestError) {
+      console.error("Failed to create telão request:", requestError);
+    }
+  } catch (dbError) {
+    console.error("Exception while creating telão request:", dbError);
+  }
+  
   const staffIds = await getTelaoRecipientsForEvent(eventId);
 
   if (staffIds.length === 0) {
@@ -1258,7 +1370,6 @@ export const sendTelaoNotification = async (
     return;
   }
 
-  // Fetch both name and phone for the selected staff
   const { data: staffData, error: staffError } = await supabase
     .from('staff')
     .select('name, phone')
@@ -1269,7 +1380,6 @@ export const sendTelaoNotification = async (
     return;
   }
 
-  // Filter out staff without valid names or phone numbers
   const validStaff = staffData.filter((s): s is { name: string; phone: string } => !!s.name && !!s.phone);
 
   if (validStaff.length === 0) {
@@ -1277,10 +1387,9 @@ export const sendTelaoNotification = async (
     return;
   }
 
-  // --- 1. Existing Webhook for Telão ---
   const oldWebhookUrl = 'https://webhook.triad3.io/webhook/solicitar-telao-cie'; 
   const oldPayload = {
-    companyName,
+    companyName: company.name,
     collaboratorName: collaborator.name,
     vehicleMarca: vehicle.marca,
     vehicleModel: vehicle.model,
@@ -1294,19 +1403,15 @@ export const sendTelaoNotification = async (
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(oldPayload),
     });
-
-    if (!response.ok) {
-      console.error('Telão notification webhook response was not ok:', response.statusText);
-    }
+    if (!response.ok) console.error('Telão notification webhook response was not ok:', response.statusText);
   } catch (error) {
     console.error('Failed to send telão notification webhook:', error);
   }
 
-  // --- 2. New Webhook for Prospect AI Chat ---
   const newWebhookUrl = 'https://webhook.prospectai.chat/webhook/0ec71931-e44c-45e2-b4e3-434a9767a11d';
   const newPayload = {
     collaboratorName: collaborator.name,
-    companyName: companyName,
+    companyName: company.name,
     selectedStaff: validStaff.map(s => ({ name: s.name, phone: s.phone })),
   };
 
@@ -1316,11 +1421,135 @@ export const sendTelaoNotification = async (
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newPayload),
     });
-
-    if (!response.ok) {
-      console.error('Prospect AI Chat webhook response was not ok:', response.statusText);
-    }
+    if (!response.ok) console.error('Prospect AI Chat webhook response was not ok:', response.statusText);
   } catch (error) {
     console.error('Failed to send Prospect AI Chat webhook:', error);
   }
+};
+
+
+// --- Company Calls ---
+export const getCompanyCallsByEvent = async (eventId: string): Promise<CompanyCall[]> => {
+    const { data, error } = await supabase
+        .from('company_calls')
+        .select(`
+            *,
+            company:participant_companies(name, logo_url),
+            department:departments(name),
+            staff:staff(name)
+        `)
+        .eq('event_id', eventId)
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        console.error("Error fetching company calls:", error);
+        throw new Error("Falha ao buscar os chamados.");
+    }
+
+    return camelCaseKeys(data) as CompanyCall[];
+};
+
+export const getPendingCompanyCallsForStaff = async (eventId: string, departmentId: string): Promise<CompanyCall[]> => {
+    const { data, error } = await supabase
+        .from('company_calls')
+        .select(`
+            *,
+            company:participant_companies(name, logo_url)
+        `)
+        .eq('event_id', eventId)
+        .eq('department_id', departmentId)
+        .eq('status', CallStatus.PENDENTE)
+        .order('created_at', { ascending: true });
+    
+    if (error) {
+        console.error("Error fetching pending calls for staff:", error);
+        return [];
+    }
+    
+    return camelCaseKeys(data) as CompanyCall[];
+};
+
+export const resolveCompanyCall = async (callId: string, staffId: string, feedback: string): Promise<CompanyCall> => {
+    const { data, error } = await supabase
+        .from('company_calls')
+        .update({
+            status: CallStatus.CONCLUIDO,
+            resolved_by_staff_id: staffId,
+            resolver_feedback: feedback,
+            resolved_at: new Date().toISOString(),
+        })
+        .eq('id', callId)
+        .select()
+        .single();
+    
+    if (error) {
+        console.error("Error resolving company call:", error);
+        throw new Error("Falha ao resolver o chamado.");
+    }
+    
+    return camelCaseKeys(data) as CompanyCall;
+};
+
+// --- Telão Requests ---
+export const getTelaoRequestsByEvent = async (eventId: string): Promise<TelaoRequest[]> => {
+    const { data, error } = await supabase
+        .from('telao_requests')
+        .select(`
+            *,
+            company:participant_companies(name, logo_url),
+            collaborator:collaborators(name),
+            vehicle:vehicle_stock(marca, model),
+            staff:staff(name)
+        `)
+        .eq('event_id', eventId)
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        console.error("Error fetching telão requests:", error);
+        throw new Error("Falha ao buscar as solicitações de telão.");
+    }
+
+    return camelCaseKeys(data) as TelaoRequest[];
+};
+
+export const getPendingTelaoRequestsForEvent = async (eventId: string): Promise<TelaoRequest[]> => {
+    const { data, error } = await supabase
+        .from('telao_requests')
+        .select(`
+            *,
+            company:participant_companies(name, logo_url),
+            collaborator:collaborators(name),
+            vehicle:vehicle_stock(marca, model)
+        `)
+        .eq('event_id', eventId)
+        .eq('status', TelaoRequestStatus.PENDENTE)
+        .order('created_at', { ascending: true });
+    
+    if (error) {
+        console.error("Error fetching pending telão requests:", error);
+        return [];
+    }
+    
+    return camelCaseKeys(data) as TelaoRequest[];
+};
+
+export const resolveTelaoRequest = async (requestId: string, staffId: string, feedback: string): Promise<TelaoRequest> => {
+    const { data, error } = await supabase
+        .from('telao_requests')
+        .update({
+            status: TelaoRequestStatus.CONCLUIDO,
+            resolved_by_staff_id: staffId,
+            resolver_feedback: feedback,
+            resolved_at: new Date().toISOString(),
+        })
+        .eq('id', requestId)
+        .select()
+        .single();
+    
+    if (error) {
+        console.error("Error resolving telão request:", error);
+        throw new Error("Falha ao resolver a solicitação.");
+    }
+    
+    return camelCaseKeys(data) as TelaoRequest;
 };

@@ -72,7 +72,7 @@ const RankingView: React.FC<Props> = ({ eventId }) => {
       setSoldVehicles(soldVehiclesData);
 
       if (staffData.length > 0) {
-        const activityPromises = staffData.map(s => getStaffActivity(s.id));
+        const activityPromises = staffData.map(s => getStaffActivity(s.id, eventId));
         const activitiesData = await Promise.all(activityPromises);
         const activitiesMap: Record<string, StaffActivity[]> = {};
         staffData.forEach((s, index) => {

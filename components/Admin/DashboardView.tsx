@@ -93,7 +93,7 @@ const DashboardView: React.FC<Props> = ({ eventId }) => {
         setReports(reportsData.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
 
         if (staffData.length > 0) {
-          const activityPromises = staffData.map(s => getStaffActivity(s.id));
+          const activityPromises = staffData.map(s => getStaffActivity(s.id, eventId));
           const activitiesData = await Promise.all(activityPromises);
           const activitiesMap: Record<string, StaffActivity[]> = {};
           staffData.forEach((s, index) => {
@@ -236,7 +236,7 @@ const DashboardView: React.FC<Props> = ({ eventId }) => {
         }
 
         const description = `Tarefa atribuída: Realizar '${taskActionName}' na empresa '${company.name}' [${company.boothCode}]. Descrição: ${taskInfo}`;
-        await apiAddTaskActivity(staffMember.id, description);
+        await apiAddTaskActivity(staffMember.id, description, eventId);
         
         setTaskSubmitStatus('success');
         await fetchData(); // Refresh data
